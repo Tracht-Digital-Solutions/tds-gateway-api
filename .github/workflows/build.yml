@@ -1,0 +1,207 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  # Fired by each API repo's CI after a green push to main (event_type
+  # api-pushed), so the bundle is reassembled "as soon as an API is pushed".
+  repository_dispatch:
+    types: [api-pushed]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint & test gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Composer validate
+        run: composer validate --no-check-publish
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: PHP syntax check
+        run: |
+          find src tests -name '*.php' -print0 \
+            | xargs -0 -n1 -P4 php -l > /dev/null
+
+      - name: PHPUnit
+        run: composer test
+
+  assemble:
+    name: Assemble gateway + services -> build branch
+    needs: check
+    # Skip on PRs; run on push to main, manual dispatch, or an API ping.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout gateway
+        uses: actions/checkout@v4
+        with:
+          path: _src/gateway
+
+      - name: Checkout tds-auth-api
+        uses: actions/checkout@v4
+        with:
+          repository: Tracht-Digital-Solutions/tds-auth-api
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/auth
+
+      - name: Checkout tds-contact-api
+        uses: actions/checkout@v4
+        with:
+          repository: Tracht-Digital-Solutions/tds-contact-api
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/contact
+
+      - name: Checkout tds-content-api
+        uses: actions/checkout@v4
+        with:
+          repository: Tracht-Digital-Solutions/tds-content-api
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/content
+
+      - name: Checkout tds-customer-api
+        uses: actions/checkout@v4
+        with:
+          repository: Tracht-Digital-Solutions/tds-customer-api
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/customer
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, openssl, pdo_mysql, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies (production only)
+        run: |
+          for dir in gateway auth contact content customer; do
+            echo "::group::composer install $dir"
+            composer install \
+              --working-dir "_src/$dir" \
+              --no-dev --no-interaction --prefer-dist --no-progress \
+              --optimize-autoloader
+            echo "::endgroup::"
+          done
+
+      - name: Assemble bundle
+        run: |
+          set -euo pipefail
+          rm -rf dist && mkdir -p dist/services
+
+          # Gateway at the root of the bundle.
+          rsync -a \
+            --exclude '.git' --exclude '.github' --exclude 'tests' \
+            --exclude 'phpunit.xml' --exclude '.phpunit.cache' \
+            _src/gateway/ dist/gateway/
+
+          # Each micro-backend under services/<name> (keep vendor/, keep
+          # auth's committed keys/public.pem; private keys are never in git).
+          for name in auth contact content customer; do
+            rsync -a \
+              --exclude '.git' --exclude '.github' --exclude 'tests' \
+              --exclude 'phpunit.xml' --exclude '.phpunit.cache' \
+              "_src/$name/" "dist/services/$name/"
+          done
+
+          # Process manifest (ports must match the gateway's *_UPSTREAM).
+          cat > dist/Procfile <<'EOF'
+          gateway: php -S 0.0.0.0:8000 -t gateway/public
+          auth: php -S 127.0.0.1:8003 -t services/auth/public
+          contact: php -S 127.0.0.1:8002 -t services/contact/public
+          content: php -S 127.0.0.1:8001 -t services/content/public
+          customer: php -S 127.0.0.1:8004 -t services/customer/public
+          EOF
+
+          cat > dist/services.json <<'EOF'
+          {
+            "gateway": { "path": "gateway", "port": 8000 },
+            "services": {
+              "auth":     { "path": "services/auth",     "port": 8003, "public_prefix": "/auth" },
+              "contact":  { "path": "services/contact",  "port": 8002, "public_prefix": "/contact" },
+              "content":  { "path": "services/content",  "port": 8001, "public_prefix": "/content" },
+              "customer": { "path": "services/customer", "port": 8004, "public_prefix": "/customer" }
+            }
+          }
+          EOF
+
+          # Provenance: which source commit each piece was built from.
+          sha() { git -C "$1" rev-parse HEAD; }
+          cat > dist/BUILD_INFO.json <<EOF
+          {
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "trigger": "${{ github.event_name }}",
+            "sources": {
+              "gateway":  "$(sha _src/gateway)",
+              "auth":     "$(sha _src/auth)",
+              "contact":  "$(sha _src/contact)",
+              "content":  "$(sha _src/content)",
+              "customer": "$(sha _src/customer)"
+            }
+          }
+          EOF
+
+          cat > dist/README.md <<'EOF'
+          # tds-api-gateway — assembled bundle (generated)
+
+          Do not edit. This branch is force-pushed by CI on every gateway or
+          API push. It contains the PHP gateway plus all four micro-backends
+          with their `vendor/` directories, ready to run.
+
+          Run with the `Procfile` (e.g. via a Procfile runner or the
+          `deploy/supervisor.conf.example` in the gateway repo). Each service
+          still needs its own `.env` on the host. See `BUILD_INFO.json` for
+          the source commit of each piece.
+          EOF
+
+      - name: Publish to build branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          # Despite the field name, this is the org PAT (repo scope), matching
+          # the frontend build-branch convention — not the default GITHUB_TOKEN.
+          github_token: ${{ secrets.ASSEMBLE_TOKEN }}
+          publish_branch: build
+          publish_dir: ./dist
+          force_orphan: true
+          commit_message: "build: assemble gateway + services (${{ github.event_name }})"
+
+      - name: Trigger deploy webhook
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
+            echo "DEPLOY_WEBHOOK_URL not set - skipping deploy ping."
+            exit 0
+          fi
+          echo "Pinging deploy webhook..."
+          curl -fsS --retry 3 --retry-delay 5 --max-time 30 "$DEPLOY_WEBHOOK_URL"
+          echo "Deploy webhook pinged."
