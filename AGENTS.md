@@ -76,13 +76,23 @@ To test the chain without an API push:
 -f event_type=api-pushed` — then confirm a `repository_dispatch`-triggered
 run lands and the `build` branch SHA advances.
 
+**The deploy-webhook ping is deliberately non-fatal — don't "fix" it back to
+`curl -fsS`.** By the time that step runs, the bundle is already force-pushed
+to `build`, so a wrong/expired/unreachable `DEPLOY_WEBHOOK_URL` (404, timeout,
+DNS) must not red the job and mask a good assembly. The step captures the HTTP
+status (`-w '%{http_code}'`, `|| echo 000` for a connect failure) and emits a
+`::warning::` annotation on a non-2xx instead of exiting non-zero. So a broken
+webhook shows as a **yellow warning on a green run**, never a red build — check
+the run annotations, not the job status, to catch a dead deploy hook. The same
+softening is mirrored in all four API repos' `ci.yml`.
+
 ### Required secrets
 
 | Secret | Where | Purpose | Status |
 |---|---|---|---|
 | `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `build` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
 | `GATEWAY_DISPATCH_TOKEN` | each of the 4 API repos | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set in all 4 |
-| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — steps skip when unset. | unset (deploy ping is a no-op until configured) |
+| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | set on the gateway but currently returns **404/timeout** (surfaces as a build warning); **unset** on all 4 API repos. Needs a correct host URL. |
 
 Gotcha: `actions/checkout` errors `Input required and not supplied: token`
 when `token:` is given but the secret resolves empty — it does **not** fall
