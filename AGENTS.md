@@ -52,11 +52,43 @@ backends — read the root `CLAUDE.md` for the big picture.
 - Triggers: push to this repo's `main`, `workflow_dispatch`, and
   `repository_dispatch` (`api-pushed`) sent by each API repo's CI.
 
-**Required secrets** (this repo): `ASSEMBLE_TOKEN` — org PAT with `repo`
-scope, SSO-authorized, used both to checkout the private API repos and to
-push the `build` branch (the peaceiris `github_token:` field). Optional:
-`DEPLOY_WEBHOOK_URL`. **Each API repo** needs `GATEWAY_DISPATCH_TOKEN` — a
-PAT that can POST `repository_dispatch` to this repo.
+### End-to-end wiring (gateway ↔ the four API repos)
+
+The auto-reassembly loop spans two halves; both are live and verified.
+
+1. **API side** — each API repo (`tds-auth-api`, `tds-contact-api`,
+   `tds-content-api`, `tds-customer-api`) has its own
+   `.github/workflows/ci.yml`: a `check` job (validate + install + `php -l` +
+   phpunit) and, on push to `main`, a `deploy` job that pings
+   `DEPLOY_WEBHOOK_URL` **and** POSTs an `api-pushed` `repository_dispatch` to
+   this repo (`.../tds-api-gateway/dispatches`) using `GATEWAY_DISPATCH_TOKEN`.
+   The dispatch step skips quietly (logs + `exit 0`) when the token is unset,
+   so a missing secret never reds the API's CI — it just silently stops
+   reassembling the gateway. The four `ci.yml` files are identical except the
+   PHP `extensions:` list (auth: `openssl`; customer: `openssl, fileinfo`).
+2. **Gateway side** — the `repository_dispatch(api-pushed)` trigger above fires
+   the `assemble` job, which rebuilds the bundle from all five repos at `main`
+   and force-pushes `build`. So a push to *any* API ⇒ that API's CI ⇒ dispatch
+   ⇒ gateway reassembles. A push to the gateway itself reassembles directly.
+
+To test the chain without an API push:
+`gh api -X POST repos/Tracht-Digital-Solutions/tds-api-gateway/dispatches
+-f event_type=api-pushed` — then confirm a `repository_dispatch`-triggered
+run lands and the `build` branch SHA advances.
+
+### Required secrets
+
+| Secret | Where | Purpose | Status |
+|---|---|---|---|
+| `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `build` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
+| `GATEWAY_DISPATCH_TOKEN` | each of the 4 API repos | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set in all 4 |
+| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — steps skip when unset. | unset (deploy ping is a no-op until configured) |
+
+Gotcha: `actions/checkout` errors `Input required and not supplied: token`
+when `token:` is given but the secret resolves empty — it does **not** fall
+back to `GITHUB_TOKEN`. A missing `ASSEMBLE_TOKEN` therefore fails `assemble`
+at the first private-repo checkout while `check` stays green (no secrets
+needed). That asymmetric failure is the tell for an unset/expired token.
 
 ## Tests
 
