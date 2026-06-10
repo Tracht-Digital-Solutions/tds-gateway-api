@@ -140,8 +140,15 @@ jobs:
           rm -rf dist && mkdir -p dist/services
 
           # Gateway at the root of the bundle.
+          #
+          # '.gitignore' MUST be excluded: the publish step git-adds dist/
+          # into the build branch, and a copied service .gitignore (all of
+          # them list /vendor/) would silently drop the vendor directories
+          # from the commit — shipping a bundle that claims to be
+          # self-contained but isn't (gateway#3).
           rsync -a \
-            --exclude '.git' --exclude '.github' --exclude 'tests' \
+            --exclude '.git' --exclude '.github' --exclude '.gitignore' \
+            --exclude 'tests' \
             --exclude 'phpunit.xml' --exclude '.phpunit.cache' \
             _src/gateway/ dist/gateway/
 
@@ -149,7 +156,8 @@ jobs:
           # auth's committed keys/public.pem; private keys are never in git).
           for name in auth contact content customer; do
             rsync -a \
-              --exclude '.git' --exclude '.github' --exclude 'tests' \
+              --exclude '.git' --exclude '.github' --exclude '.gitignore' \
+              --exclude 'tests' \
               --exclude 'phpunit.xml' --exclude '.phpunit.cache' \
               "_src/$name/" "dist/services/$name/"
           done
