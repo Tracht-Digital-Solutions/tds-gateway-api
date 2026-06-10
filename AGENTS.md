@@ -45,10 +45,16 @@ backends — read the root `CLAUDE.md` for the big picture.
 
 - `check` job: validate + install + `php -l` + phpunit (runs on PRs too).
 - `assemble` job (not on PRs): checks out the gateway + all four API repos at
-  `main`, runs `composer install --no-dev` for each, assembles `dist/`
-  (gateway at root, services under `services/`, plus Procfile / services.json
-  / BUILD_INFO.json), force-pushes to the orphan `build` branch, then pings
-  `DEPLOY_WEBHOOK_URL`.
+  `main`, runs `composer install --no-dev` for each, **re-adds phinx per
+  service** (`composer require robmorgan/phinx:<require-dev constraint>
+  --update-no-dev`) so the host can run migrations from the bundle without a
+  composer install, assembles `dist/` (gateway at root, services under
+  `services/`, plus Procfile / services.json / BUILD_INFO.json), force-pushes
+  to the orphan `build` branch, then pings `DEPLOY_WEBHOOK_URL`.
+- `public/.htaccess` ships the Apache front-controller rewrite (same file as
+  the four APIs) so the gateway can run straight under PHP-FPM with the
+  docroot on `gateway/public` — the Plesk model in `DEPLOY-PLESK.md`. Without
+  it every route except `/` 404s on Apache hosts.
 - Triggers: push to this repo's `main`, `workflow_dispatch`, and
   `repository_dispatch` (`api-pushed`) sent by each API repo's CI.
 

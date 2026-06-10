@@ -45,13 +45,26 @@ Deploy is host-agnostic, like the other repos: on a successful build the
 `build` branch is force-pushed and `DEPLOY_WEBHOOK_URL` is pinged. The host
 checks out `build` and runs the bundle.
 
-Two ways to run the surface — pick one:
+> **Plesk:** the full click-by-click release guide (domains, subdomains,
+> SSL, the single-project API deploy, webhooks) is in
+> [`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md).
 
-1. **PHP gateway** (this repo). Run all five processes from the bundle's
+Three ways to run the surface — pick one:
+
+1. **Gateway under PHP-FPM** (Plesk-style). Point the webserver docroot at
+   `gateway/public` (the bundled `.htaccess` does the front-controller
+   rewrite on Apache) and run only the four service processes. No gateway
+   process needed.
+2. **PHP gateway as a process.** Run all five processes from the bundle's
    `Procfile` (see `deploy/supervisor.conf.example`) and point the host's
    webserver at the gateway on `:8000`. The gateway proxies to the services.
-2. **nginx only** (no PHP hop). Run just the four services and use
+3. **nginx only** (no PHP hop). Run just the four services and use
    `deploy/nginx.conf.example` to prefix-route straight to their ports.
+
+Migrations run **from the bundle**: the assemble workflow re-adds phinx
+after the `--no-dev` install, so
+`php vendor/bin/phinx migrate -e production` works inside each
+`services/<name>/` without a composer install on the host.
 
 Either way, each service still needs its own `.env` on the host (DB creds,
 JWT keys, Resend/Stripe secrets — see each service's INSTALL.md). The gateway

@@ -113,6 +113,27 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The APIs keep phinx in require-dev, but the host needs it to run
+      # `vendor/bin/phinx migrate -e production` from the bundle (the whole
+      # point of the single-project deploy is that the host never runs a
+      # full composer install). Re-add it post --no-dev with the exact
+      # constraint each repo pins in require-dev, so the bundle ships the
+      # migration runner without dragging phpunit & friends along.
+      - name: Add phinx for host-side migrations
+        run: |
+          for dir in auth contact content customer; do
+            constraint=$(jq -r '."require-dev"."robmorgan/phinx" // empty' "_src/$dir/composer.json")
+            if [ -z "$constraint" ]; then
+              echo "::warning title=phinx missing::_src/$dir has no robmorgan/phinx in require-dev - bundle ships without a migration runner for $dir."
+              continue
+            fi
+            echo "::group::composer require phinx $dir ($constraint)"
+            composer require "robmorgan/phinx:$constraint" \
+              --working-dir "_src/$dir" \
+              --no-interaction --no-progress --update-no-dev --optimize-autoloader
+            echo "::endgroup::"
+          done
+
       - name: Assemble bundle
         run: |
           set -euo pipefail

@@ -65,5 +65,11 @@ The assembly runs on:
 
 So the merged bundle is always rebuilt as soon as any API changes.
 
+Each service bundles phinx (re-added after the `--no-dev` install), so the
+host runs migrations straight from the bundle — no composer on the host.
+
 See `AGENTS.md` for architecture/gotchas and `INSTALL.md` for the required
 secrets and host wiring (`deploy/` has nginx + supervisor examples).
+**[`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md)** is the complete production release
+guide for a Plesk host — domains, subdomains, SSL, the single-project API
+deploy and the deploy webhooks.
