@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -58,12 +58,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout gateway
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _src/gateway
 
       - name: Checkout tds-auth-api
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Tracht-Digital-Solutions/tds-auth-api
           ref: main
@@ -71,7 +71,7 @@ jobs:
           path: _src/auth
 
       - name: Checkout tds-contact-api
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Tracht-Digital-Solutions/tds-contact-api
           ref: main
@@ -79,7 +79,7 @@ jobs:
           path: _src/contact
 
       - name: Checkout tds-content-api
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Tracht-Digital-Solutions/tds-content-api
           ref: main
@@ -87,7 +87,7 @@ jobs:
           path: _src/content
 
       - name: Checkout tds-customer-api
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Tracht-Digital-Solutions/tds-customer-api
           ref: main
