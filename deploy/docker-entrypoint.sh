@@ -131,13 +131,10 @@ until mysqladmin ping -h"$DB_HOST" -P"$DB_PORT" --silent 2>/dev/null; do
   sleep 1
 done
 
-for name in auth contact content customer; do
-  if [ -x "$SERVICES_DIR/$name/vendor/bin/phinx" ]; then
-    echo "[entrypoint] migrating $name…"
-    ( cd "$SERVICES_DIR/$name" && php vendor/bin/phinx migrate -e production ) \
-      || echo "[entrypoint] WARN: migrate $name failed"
-  fi
-done
+# Migrations: reuse the bundled migrate-stack.sh (same loop, one source).
+echo "[entrypoint] running migrations…"
+TDS_SERVICES_DIR="$SERVICES_DIR" PHP_BIN=php sh /srv/tds/gateway/bin/migrate-stack.sh \
+  || echo "[entrypoint] WARN: some migrations failed — starting anyway."
 
 echo "[entrypoint] starting processes…"
 exec "$@"
