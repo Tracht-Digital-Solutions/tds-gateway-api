@@ -1,0 +1,143 @@
+#!/bin/sh
+# Container entrypoint for the all-in-one TDS API image.
+#
+#   1. Generate a services/<name>/.env for any service that doesn't already
+#      have one (a mounted real .env always wins — these are dev defaults).
+#   2. Make sure the auth service has an RS256 keypair to sign with.
+#   3. Wait for the database, then run every service's migrations.
+#   4. Hand off to CMD (supervisord), which runs the five processes.
+#
+# Secrets come from the container environment (compose `environment:` /
+# `env_file:`); anything unset falls back to a dev-safe placeholder so a bare
+# `docker compose up` still boots end-to-end.
+
+set -eu
+
+SERVICES_DIR=/srv/tds/services
+
+# --- shared DB connection (one MariaDB, one database per service) ----------
+DB_HOST=${DB_HOST:-db}
+DB_PORT=${DB_PORT:-3306}
+DB_USER=${DB_USER:-tds}
+DB_PASS=${DB_PASS:-tds}
+
+# --- shared cross-service settings -----------------------------------------
+ADMIN_TOKEN=${ADMIN_TOKEN:-dev-admin-token-change-me}
+AUTH_API_URL=${AUTH_API_URL:-http://127.0.0.1:8000/auth}
+CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4321}
+
+write_env_if_absent() {
+  # $1 = service name, remaining stdin = file body
+  file="$SERVICES_DIR/$1/.env"
+  if [ -f "$file" ]; then
+    echo "[entrypoint] $1: keeping existing .env"
+    return
+  fi
+  cat > "$file"
+  echo "[entrypoint] $1: wrote dev .env"
+}
+
+write_env_if_absent auth <<EOF
+APP_ENV=production
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=${AUTH_DB_NAME:-tds_auth}
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+ADMIN_TOKEN=$ADMIN_TOKEN
+JWT_KEY_ID=${JWT_KEY_ID:-tds-auth-dev-1}
+JWT_ISSUER=${JWT_ISSUER:-http://127.0.0.1:8000/auth}
+JWT_TTL_SECONDS=${JWT_TTL_SECONDS:-3600}
+JWT_REFRESH_TTL_SECONDS=${JWT_REFRESH_TTL_SECONDS:-2592000}
+COOKIE_DOMAIN=${COOKIE_DOMAIN:-localhost}
+COOKIE_NAME=${COOKIE_NAME:-tds_session}
+LOGIN_RATE_LIMIT=${LOGIN_RATE_LIMIT:-10}
+LOGIN_RATE_WINDOW_SECONDS=${LOGIN_RATE_WINDOW_SECONDS:-900}
+CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+EOF
+# JWT_PRIVATE_KEY only when provided; otherwise auth falls back to keys/private.pem (below).
+if [ -n "${JWT_PRIVATE_KEY:-}" ] && ! grep -q '^JWT_PRIVATE_KEY=' "$SERVICES_DIR/auth/.env" 2>/dev/null; then
+  printf 'JWT_PRIVATE_KEY=%s\n' "$JWT_PRIVATE_KEY" >> "$SERVICES_DIR/auth/.env"
+fi
+
+write_env_if_absent contact <<EOF
+APP_ENV=production
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=${CONTACT_DB_NAME:-tds_contact_ratelimit}
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+RESEND_API_KEY=${RESEND_API_KEY:-}
+RESEND_FROM=${RESEND_FROM:-noreply@tracht-digital.de}
+CONTACT_EMAIL=${CONTACT_EMAIL:-hallo@tracht-digital.de}
+RATE_LIMIT_PER_HOUR=${RATE_LIMIT_PER_HOUR:-3}
+CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+EOF
+
+write_env_if_absent content <<EOF
+APP_ENV=production
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=${CONTENT_DB_NAME:-tds_content}
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+ADMIN_TOKEN=$ADMIN_TOKEN
+AUTH_API_URL=$AUTH_API_URL
+BLOG_UPLOAD_DIR=${BLOG_UPLOAD_DIR:-/srv/tds/var/blog-uploads}
+GITHUB_DISPATCH_TOKEN=${GITHUB_DISPATCH_TOKEN:-}
+BLOG_REBUILD_REPO=${BLOG_REBUILD_REPO:-Tracht-Digital-Solutions/tds-blog}
+BLOG_REBUILD_WORKFLOW=${BLOG_REBUILD_WORKFLOW:-build.yml}
+BLOG_REBUILD_REF=${BLOG_REBUILD_REF:-main}
+CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+EOF
+
+write_env_if_absent customer <<EOF
+APP_ENV=production
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=${CUSTOMER_DB_NAME:-tds_customer}
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+AUTH_API_URL=$AUTH_API_URL
+JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
+ADMIN_TOKEN=$ADMIN_TOKEN
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+STRIPE_PUBLIC_KEY=${STRIPE_PUBLIC_KEY:-}
+STRIPE_RETURN_URL=${STRIPE_RETURN_URL:-http://localhost:4321/invoices}
+DOCUMENT_ROOT_DIR=${DOCUMENT_ROOT_DIR:-/srv/tds/var/customer-files}
+DOCUMENT_SIGN_SECRET=${DOCUMENT_SIGN_SECRET:-dev-document-sign-secret-change-me}
+CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+EOF
+
+# Storage dirs the services expect to be writable.
+mkdir -p /srv/tds/var/blog-uploads /srv/tds/var/customer-files
+
+# auth: ensure a signing keypair exists (keygen writes keys/{private,public}.pem).
+if [ -z "${JWT_PRIVATE_KEY:-}" ] && [ ! -f "$SERVICES_DIR/auth/keys/private.pem" ]; then
+  echo "[entrypoint] auth: generating a dev RS256 keypair"
+  php "$SERVICES_DIR/auth/bin/keygen.php" || echo "[entrypoint] WARN: keygen failed"
+fi
+
+# Wait for the database before migrating.
+echo "[entrypoint] waiting for database at $DB_HOST:$DB_PORT…"
+i=0
+until mysqladmin ping -h"$DB_HOST" -P"$DB_PORT" --silent 2>/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -ge 60 ]; then
+    echo "[entrypoint] WARN: database not reachable after 60s — starting anyway."
+    break
+  fi
+  sleep 1
+done
+
+for name in auth contact content customer; do
+  if [ -x "$SERVICES_DIR/$name/vendor/bin/phinx" ]; then
+    echo "[entrypoint] migrating $name…"
+    ( cd "$SERVICES_DIR/$name" && php vendor/bin/phinx migrate -e production ) \
+      || echo "[entrypoint] WARN: migrate $name failed"
+  fi
+done
+
+echo "[entrypoint] starting processes…"
+exec "$@"

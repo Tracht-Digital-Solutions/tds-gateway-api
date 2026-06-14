@@ -1,7 +1,9 @@
 /vendor/
 /.env
 /.env.local
+/.env.docker
 /dist/
+/logs/
 /.idea/
 /.vscode/
 /.phpunit.cache/

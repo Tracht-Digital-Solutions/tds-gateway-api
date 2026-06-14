@@ -1,0 +1,87 @@
+# One command brings the whole TDS API surface up:
+#
+#   docker compose up --build
+#
+# That starts MariaDB and the all-in-one API container (gateway :8000 + the
+# four micro-backends on the loopback). The gateway is published on
+# http://localhost:8080 by default.
+#
+#   curl http://localhost:8080/healthz          # aggregated service health
+#   curl http://localhost:8080/content/blog     # → content-api
+#
+# Requires the four API repos checked out next to this one (../tds-*-api) —
+# they are wired in as named build contexts. Secrets are read from an optional
+# ./.env.docker (copy .env.docker.example); without it the stack still boots
+# on dev-safe placeholders.
+#
+# The static frontends are optional and off by default (they are normally
+# deployed standalone). Build each one's dist/ first, then:
+#   docker compose --profile frontends up --build
+
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:-root}
+      MARIADB_USER: ${DB_USER:-tds}
+      MARIADB_PASSWORD: ${DB_PASS:-tds}
+      # A throwaway db so the image initialises cleanly; the real per-service
+      # databases are created by deploy/db-init/01-databases.sql.
+      MARIADB_DATABASE: tds_bootstrap
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./deploy/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        auth: ../tds-auth-api
+        contact: ../tds-contact-api
+        content: ../tds-content-api
+        customer: ../tds-customer-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-tds}
+      DB_PASS: ${DB_PASS:-tds}
+    env_file:
+      - path: ./.env.docker
+        required: false
+    ports:
+      - "${API_PORT:-8080}:8000"
+
+  # Optional: serve the four static frontends from their built dist/ folders.
+  # `docker compose --profile frontends up`. Build each dist/ first
+  # (cd ../tds-landingpage && npm run build, …).
+  web:
+    image: nginx:1.27-alpine
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./deploy/nginx.frontends.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../tds-landingpage/dist:/srv/landingpage:ro
+      - ../tds-blog/dist:/srv/blog:ro
+      - ../tds-admin/dist:/srv/admin:ro
+      - ../tds-customer/dist:/srv/customer:ro
+    ports:
+      - "${LANDING_PORT:-4321}:8081" # landingpage
+      - "${BLOG_PORT:-4322}:8082"    # blog
+      - "${ADMIN_PORT:-4323}:8083"   # admin
+      - "${CUSTOMER_PORT:-4324}:8084" # customer portal
+
+volumes:
+  db-data:

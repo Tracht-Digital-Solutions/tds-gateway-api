@@ -1,5 +1,13 @@
 # INSTALL — tds-api-gateway
 
+> **Running the whole stack (gateway + the four APIs)?** Pick a guide:
+> - [`INSTALL-STACK.md`](./INSTALL-STACK.md) — bare-metal/Plesk-style: deploy the
+>   bundle, then `bin/start-stack.sh` brings the four services up.
+> - [`INSTALL-DOCKER.md`](./INSTALL-DOCKER.md) — one command (`docker compose up`)
+>   for MariaDB + gateway + all four services.
+> - [`DEPLOY-PLESK-GATEWAY.md`](./DEPLOY-PLESK-GATEWAY.md) — focused gateway-on-Plesk
+>   release.
+
 ## 1. Local dev
 
 ```bash
