@@ -212,6 +212,12 @@ jobs:
           the source commit of each piece.
           EOF
 
+      # Generate the API wiki from the just-checked-out route definitions so
+      # new routes always show up. Reads _src/<svc>/src/Bootstrap.php and
+      # writes dist/API-WIKI.md + dist/wiki/index.html (served gated at /wiki).
+      - name: Generate API wiki
+        run: php _src/gateway/bin/gen-api-wiki.php dist
+
       - name: Publish to build branch
         uses: peaceiris/actions-gh-pages@v4
         with:

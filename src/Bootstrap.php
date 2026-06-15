@@ -10,6 +10,7 @@ use Slim\Factory\AppFactory;
 use Tds\ApiGateway\Action\HealthAction;
 use Tds\ApiGateway\Action\IndexAction;
 use Tds\ApiGateway\Action\ProxyAction;
+use Tds\ApiGateway\Action\WikiAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\CurlProxyClient;
 
@@ -51,6 +52,13 @@ final class Bootstrap
             $c->get(ServiceRegistry::class),
         ));
 
+        // Internal API wiki, gated by the shared ADMIN_TOKEN (disabled when
+        // unset). Serves the generated wiki/index.html from the bundle.
+        $container->set(WikiAction::class, static fn () => new WikiAction(
+            $env('ADMIN_TOKEN', ''),
+            $rootDir,
+        ));
+
         AppFactory::setContainer($container);
         $app = AppFactory::create();
         $app->addRoutingMiddleware();
@@ -58,6 +66,8 @@ final class Bootstrap
 
         $app->get('/', IndexAction::class);
         $app->get('/healthz', HealthAction::class);
+        // Internal, login-gated API wiki (not proxied).
+        $app->get('/wiki', WikiAction::class);
         // Everything else is proxied. FastRoute prefers the static routes
         // above over this variable catch-all.
         $app->map(

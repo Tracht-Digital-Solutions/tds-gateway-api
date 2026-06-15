@@ -30,8 +30,19 @@ literally `/contact`, so it is mapped with a `/contact` rewrite
 - `GET /` — navigation: lists the public service prefixes.
 - `GET /healthz` — aggregated health; pings every upstream's `/healthz`
   with a short timeout. `200` when all healthy, `503` otherwise.
+- `GET /wiki` — the internal **API wiki** (auto-generated route reference
+  for every service). Login-gated by `ADMIN_TOKEN`; disabled (`404`) when
+  that env is unset, so it is never reachable without being logged in.
 - everything else — proxied to the matching upstream (`404` if no prefix
   matches, `502` if the upstream is unreachable).
+
+## API wiki
+
+`bin/gen-api-wiki.php` parses every service's `src/Bootstrap.php` and emits
+`API-WIKI.md` (committed reference) + `wiki/index.html` (the page served at
+`/wiki`). Because it reads the route definitions themselves, **new routes
+appear automatically** — CI regenerates the wiki on every build. Run it
+locally with `php bin/gen-api-wiki.php`.
 
 ## Commands
 
