@@ -56,8 +56,10 @@ Wichtig je Service (Details im `INSTALL.md` des jeweiligen API-Repos):
 - **content** — DB; `ADMIN_TOKEN` (muss zu auth/customer passen).
 - **customer** — DB; `ADMIN_TOKEN`; Stripe-Keys; `DOCUMENT_SIGN_SECRET`.
 
-Das **Gateway** braucht keine `.env`, solange die Service-Ports den
-`*_UPSTREAM`-Defaults (`127.0.0.1:800x`) entsprechen.
+Das **Gateway** braucht nur dann eine `.env`, wenn die Service-Ports von den
+`*_UPSTREAM`-Defaults (`127.0.0.1:800x`) abweichen — oder wenn das interne
+`/wiki` aktiv sein soll: dann `ADMIN_TOKEN` setzen (gleicher Admin-Token wie
+die Backends; ohne ihn ist `/wiki` deaktiviert, 404).
 
 ## 3. Datenbanken + Migrationen
 

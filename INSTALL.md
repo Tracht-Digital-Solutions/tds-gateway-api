@@ -76,8 +76,9 @@ after the `--no-dev` install, so
 
 Either way, each service still needs its own `.env` on the host (DB creds,
 JWT keys, Resend/Stripe secrets — see each service's INSTALL.md). The gateway
-itself needs no secrets; only the `*_UPSTREAM` values if the ports differ
-from the defaults.
+itself needs only the `*_UPSTREAM` values if the ports differ from the
+defaults, plus `ADMIN_TOKEN` if you want the internal `/wiki` (set it to the
+same shared admin token; unset leaves the wiki disabled/404).
 
 ## 4. Verifying the pipeline
 

@@ -138,7 +138,8 @@ zusätzlich in den Passwort-Manager.
 - **content**: DB-Zugang, `ADMIN_TOKEN`.
 - **customer**: DB-Zugang, Stripe-Keys, `ADMIN_TOKEN`, JWKS-URL.
 - **gateway**: braucht standardmäßig **keine** `.env` — die Upstream-Defaults
-  (`127.0.0.1:800x`) passen zu 4.2.
+  (`127.0.0.1:800x`) passen zu 4.2. Nur für das interne `/wiki` zusätzlich
+  `ADMIN_TOKEN` setzen (gleicher Admin-Token; ohne ihn ist `/wiki` 404).
 
 Details je Service: das `INSTALL.md` im jeweiligen API-Repo.
 
