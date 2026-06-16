@@ -36,6 +36,13 @@ cd /srv/tds
 
 Spätere Updates: `git pull` (oder der Deploy-Webhook, s. u.).
 
+> **Schnellweg — Web-Installer:** Statt der Schritte 2–4 von Hand kann der
+> Assistent unter **`https://api.tracht-digital.de/install.php`** alles
+> erledigen: Datenbank verbinden/anlegen, alle `.env`-Dateien schreiben, das
+> Auth-Schlüsselpaar erzeugen und die Migrationen ausführen. Danach
+> `gateway/public/install.php` **löschen** (während der Einrichtung idealerweise
+> per IP beschränken). Die manuellen Schritte unten bleiben als Referenz.
+
 ## 2. Pro Service eine `.env` anlegen
 
 Jeder Service liest seine DB-Zugangsdaten und Secrets aus

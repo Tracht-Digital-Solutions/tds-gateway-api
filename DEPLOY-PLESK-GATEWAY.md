@@ -41,6 +41,12 @@ ein eigener Gateway-Prozess ist **nicht** nötig.
 
 ## 4. Datenbanken + `.env` je Service
 
+> **Schnellweg:** Sobald der Docroot steht (Schritt 3), erledigt der
+> Web-Installer unter **`https://api.tracht-digital.de/install.php`** die
+> Punkte 4.1–4.4 (DB testen/anlegen, alle `.env` schreiben, Auth-Keypair,
+> Migrationen). Danach `gateway/public/install.php` **löschen** und während
+> der Einrichtung am besten per IP/Passwort schützen. Manuell geht es so:
+
 1. In Plesk vier MariaDB-DBs + DB-User anlegen (`tds_auth`,
    `tds_contact_ratelimit`, `tds_content`, `tds_customer` — Namen müssen zur
    jeweiligen `.env` passen).

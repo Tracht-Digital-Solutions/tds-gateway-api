@@ -33,8 +33,25 @@ literally `/contact`, so it is mapped with a `/contact` rewrite
 - `GET /wiki` — the internal **API wiki** (auto-generated route reference
   for every service). Login-gated by `ADMIN_TOKEN`; disabled (`404`) when
   that env is unset, so it is never reachable without being logged in.
+- `GET /install.php` — the **web install wizard** (first-run setup); see below.
 - everything else — proxied to the matching upstream (`404` if no prefix
   matches, `502` if the upstream is unreachable).
+
+## Web installer (`/install.php`)
+
+A self-contained setup assistant that ships in the bundle
+(`gateway/public/install.php`). Open it once after the first deploy and it
+walks you through: requirements check → **database connection** (tests the
+connection, can create the per-service databases) → secrets (admin token,
+CORS, optional Resend/Stripe/GitHub keys) → then writes every
+`services/<name>/.env` (+ the gateway `.env`), generates the auth RS256
+keypair, creates the storage dirs and runs each service's phinx migrations.
+
+**Security:** it refuses to run once configured (a `.tds-installed` lock or
+an existing `services/auth/.env`), and the final screen offers to delete
+itself. **Delete `gateway/public/install.php` once you're live** (and ideally
+IP-restrict `/install.php` during setup) — before the first install it is an
+open setup endpoint.
 
 ## API wiki
 
