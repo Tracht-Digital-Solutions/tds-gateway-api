@@ -288,45 +288,103 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 <style>
   :root{--haupt:#050f68;--akzent:#820933;--paper:#fafaf7;--soft:#f1efe8;--line:#e8e6df;
     --ink:#1a1a17;--muted:#6b6b66;--card:#fff;--ok:#146c43;--okbg:#e6f4ea;--err:#a51d1d;--errbg:#fbeaea;
-    --fd:"Hanken Grotesk",system-ui,sans-serif;--fb:"Plus Jakarta Sans",system-ui,sans-serif;--fm:"JetBrains Mono",monospace;}
+    --fd:"Hanken Grotesk",system-ui,sans-serif;--fb:"Plus Jakarta Sans",system-ui,sans-serif;--fm:"JetBrains Mono",monospace;
+    --ease:cubic-bezier(.22,1,.36,1);}
   *{box-sizing:border-box}
-  body{margin:0;font-family:var(--fb);background:var(--paper);color:var(--ink);line-height:1.55}
-  .wrap{max-width:760px;margin:0 auto;padding:48px 24px 80px}
-  h1{font-family:var(--fd);font-weight:800;letter-spacing:-.03em;font-size:clamp(28px,5vw,40px);margin:0 0 4px}
+  body{margin:0;font-family:var(--fb);background:var(--paper);color:var(--ink);line-height:1.55;
+    min-height:100vh;position:relative;overflow-x:hidden}
+
+  /* Animated brand aurora behind the card */
+  .bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+  .blob{position:absolute;border-radius:50%;filter:blur(72px);opacity:.45;will-change:transform}
+  .blob.b1{width:46vmax;height:46vmax;left:-12vmax;top:-16vmax;
+    background:radial-gradient(circle,color-mix(in srgb,var(--haupt) 60%,transparent),transparent 70%);
+    animation:drift1 26s ease-in-out infinite}
+  .blob.b2{width:40vmax;height:40vmax;right:-14vmax;top:6vmax;
+    background:radial-gradient(circle,color-mix(in srgb,var(--akzent) 55%,transparent),transparent 70%);
+    animation:drift2 31s ease-in-out infinite}
+  .blob.b3{width:36vmax;height:36vmax;left:24vmax;bottom:-22vmax;
+    background:radial-gradient(circle,color-mix(in srgb,var(--haupt) 40%,transparent),transparent 70%);
+    animation:drift1 37s ease-in-out infinite reverse}
+  @keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(6vmax,4vmax) scale(1.12)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-5vmax,6vmax) scale(1.08)}}
+
+  .wrap{max-width:740px;margin:0 auto;padding:clamp(28px,6vw,64px) 20px 80px}
+  .card{position:relative;background:color-mix(in srgb,var(--card) 82%,transparent);
+    backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);
+    border:1px solid color-mix(in srgb,var(--haupt) 12%,var(--line));border-radius:24px;
+    padding:clamp(24px,4vw,44px);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 30px 70px -30px rgba(5,15,104,.45);
+    animation:rise .6s var(--ease) both}
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  @keyframes pop{0%{transform:scale(.92)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+  @keyframes slidein{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+  @keyframes draw{to{width:68px}}
+
+  .brandmark{display:inline-flex;align-items:center;gap:10px;margin-bottom:14px}
+  .brandmark .mk{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#fff;
+    font-family:var(--fd);font-weight:800;font-size:16px;
+    background:linear-gradient(135deg,var(--haupt),color-mix(in srgb,var(--haupt) 55%,var(--akzent)));
+    box-shadow:0 8px 20px -8px var(--haupt)}
+  .brandmark .wd{font-family:var(--fd);font-weight:700;letter-spacing:-.01em;font-size:15px}
+  .brandmark .wd i{font-style:italic;color:var(--akzent)}
+
+  h1{font-family:var(--fd);font-weight:800;letter-spacing:-.03em;font-size:clamp(28px,5vw,40px);
+    margin:0 0 6px;position:relative;display:inline-block}
+  h1::after{content:"";position:absolute;left:0;bottom:-7px;height:4px;width:0;border-radius:2px;
+    background:linear-gradient(90deg,var(--haupt),var(--akzent));animation:draw .8s .35s var(--ease) forwards}
   .eyebrow{font-family:var(--fd);font-weight:700;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--akzent);margin:0 0 8px}
-  h2{font-family:var(--fd);font-weight:700;letter-spacing:-.02em;font-size:22px;margin:28px 0 4px}
+  h2{font-family:var(--fd);font-weight:700;letter-spacing:-.02em;font-size:22px;margin:30px 0 6px}
   p{margin:0 0 14px;color:var(--muted)}
   code{font-family:var(--fm);font-size:.85em;background:var(--soft);padding:.1em .4em;border-radius:4px}
-  .steps{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 32px;font-size:13px}
-  .steps span{padding:5px 12px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-  .steps span.on{background:var(--haupt);color:#fff;border-color:var(--haupt);font-weight:600}
-  .steps span.done{border-color:var(--ok);color:var(--ok)}
+  .steps{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 30px;font-size:13px}
+  .steps span{display:inline-flex;align-items:center;padding:6px 13px;border-radius:999px;border:1px solid var(--line);
+    color:var(--muted);background:color-mix(in srgb,var(--card) 55%,transparent);transition:all .3s var(--ease)}
+  .steps span.on{background:var(--haupt);color:#fff;border-color:var(--haupt);font-weight:600;
+    box-shadow:0 8px 20px -10px var(--haupt);animation:pop .45s var(--ease)}
+  .steps span.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--line));color:var(--ok);
+    background:color-mix(in srgb,var(--okbg) 70%,transparent)}
   label{display:block;font-weight:600;font-size:14px;margin:14px 0 5px}
   label .opt{font-weight:400;color:var(--muted);font-size:12px}
-  input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
-    font-family:var(--fm);font-size:14px;background:#fff}
-  input:focus{outline:none;border-color:var(--haupt);box-shadow:0 0 0 3px rgba(5,15,104,.14)}
+  input[type=text],input[type=password]{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:9px;
+    font-family:var(--fm);font-size:14px;background:#fff;transition:border-color .2s ease,box-shadow .2s ease}
+  input:focus{outline:none;border-color:var(--haupt);box-shadow:0 0 0 3px rgba(5,15,104,.16)}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .grid4{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  fieldset{border:1px solid var(--line);border-radius:12px;padding:18px;margin:20px 0}
+  fieldset{border:1px solid var(--line);border-radius:14px;padding:18px;margin:20px 0;
+    background:color-mix(in srgb,var(--card) 50%,transparent)}
   legend{font-family:var(--fd);font-weight:700;padding:0 8px;font-size:14px}
-  .btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:10px;background:var(--haupt);color:#fff;
-    font-family:var(--fd);font-weight:600;font-size:15px;padding:11px 22px;cursor:pointer;text-decoration:none;margin-top:20px}
-  .btn:hover{background:#040b50}
-  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
-  .check{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
-  .badge{font-family:var(--fm);font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:11px;color:#fff;
+    background:linear-gradient(135deg,var(--haupt),color-mix(in srgb,var(--haupt) 78%,var(--akzent)));
+    font-family:var(--fd);font-weight:600;font-size:15px;padding:12px 24px;cursor:pointer;text-decoration:none;margin-top:20px;
+    box-shadow:0 10px 24px -12px var(--haupt);transition:transform .18s var(--ease),box-shadow .18s var(--ease)}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 16px 32px -12px var(--haupt)}
+  .btn:active{transform:translateY(0)}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);box-shadow:none}
+  .check{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;
+    animation:slidein .5s var(--ease) both}
+  .badge{font-family:var(--fm);font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
   .b-ok{background:var(--okbg);color:var(--ok)} .b-err{background:var(--errbg);color:var(--err)} .b-warn{background:#fff4d6;color:#8a5a00}
-  .note{padding:12px 16px;border-radius:10px;font-size:14px;margin:14px 0}
+  .note{padding:13px 16px;border-radius:11px;font-size:14px;margin:14px 0;animation:rise .5s var(--ease) both}
   .note.err{background:var(--errbg);color:var(--err)} .note.ok{background:var(--okbg);color:var(--ok)} .note.warn{background:#fff4d6;color:#8a5a00}
   pre{background:var(--ink);color:#f5f3ec;padding:12px 14px;border-radius:8px;overflow:auto;font-family:var(--fm);font-size:12px;max-height:220px}
   .cb{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:14px;color:var(--ink)}
   .muted-line{font-size:13px;color:var(--muted);margin-top:6px}
+  @media (prefers-reduced-motion:reduce){
+    .blob{animation:none}
+    .card,.note,.check,.steps span.on{animation:none}
+    h1::after{animation:none;width:68px}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <p class="eyebrow">Tracht Digital · API-Gateway</p>
+<div class="bg" aria-hidden="true">
+  <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+</div>
+<main class="wrap">
+<div class="card">
+  <div class="brandmark"><span class="mk">T</span><span class="wd">Tracht <i>Digital</i></span></div>
+  <p class="eyebrow">API-Gateway · Setup</p>
   <h1>Installation</h1>
   <p>Assistent zum Einrichten der API-Plattform und Verbinden der Datenbank.</p>
 
@@ -495,5 +553,6 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     </form>
   <?php endif; ?>
 </div>
+</main>
 </body>
 </html>
