@@ -98,7 +98,7 @@ softening is mirrored in all four API repos' `ci.yml`.
 |---|---|---|---|
 | `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `build` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
 | `GATEWAY_DISPATCH_TOKEN` | each of the 4 API repos | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set in all 4 |
-| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | set on the gateway but currently returns **404/timeout** (surfaces as a build warning); **unset** on all 4 API repos. Needs a correct host URL. |
+| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | Wire to the host's deploy hook once its URL is known; while unset or misconfigured the ping just skips / warns and never reds the job. |
 
 Gotcha: `actions/checkout` errors `Input required and not supplied: token`
 when `token:` is given but the secret resolves empty — it does **not** fall

@@ -165,7 +165,7 @@ So: don't commit `vendor/` (the deploy hook installs it), and don't commit
   (withastro/astro#16542). Don't reintroduce the Vite plugin in any frontend.
 - **lightningcss `cssTarget` lives in the shared `tdsViteBuild` preset.** All four
   frontends spread `tdsViteBuild` (from `@tracht-digital-solutions/tds-shared/astro`,
-  since tds-shared 0.4.0) into `vite.build`. It pins the Safari floor so lightningcss
+  since tds-shared 0.4.0; current 0.4.2) into `vite.build`. It pins the Safari floor so lightningcss
   keeps the `-webkit-backdrop-filter` prefix on the frosted `.brand-header`; without it
   the blur silently dies in Safari ≤17 — no error, no test. Don't hand-author the
   `cssTarget` array back into a frontend's `astro.config.mjs` (tds-shared#10).
