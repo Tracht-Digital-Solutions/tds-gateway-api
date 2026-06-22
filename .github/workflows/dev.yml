@@ -1,0 +1,22 @@
+name: Dev assemble → dev branch
+
+# Developer bundle: reassemble gateway + all services into the `dev` branch
+# on every gateway push or an API's api-pushed dispatch. NOT deployed.
+on:
+  push:
+    branches: [main]
+  repository_dispatch:
+    types: [api-pushed]
+  workflow_dispatch:
+
+concurrency:
+  group: dev-assemble
+  cancel-in-progress: true
+
+jobs:
+  dev:
+    uses: ./.github/workflows/_assemble.yml
+    with:
+      channel: dev
+      deploy: false
+    secrets: inherit

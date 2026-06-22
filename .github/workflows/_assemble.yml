@@ -1,19 +1,23 @@
-name: Build
+name: Assemble (reusable)
+
+# Reusable: check the gateway, assemble gateway + all 4 services into a
+# self-contained bundle, force-publish it to the `channel` branch, and
+# optionally ping the deploy webhook. Called by dev.yml (channel=dev, no
+# deploy) and release.yml (channel=release, deploy=true). Same-repo
+# workflow_call — no cross-repo org restriction.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-  # Fired by each API repo's CI after a green push to main (event_type
-  # api-pushed), so the bundle is reassembled "as soon as an API is pushed".
-  repository_dispatch:
-    types: [api-pushed]
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+    inputs:
+      channel:
+        description: Target branch (dev | release)
+        required: true
+        type: string
+      deploy:
+        description: Ping the deploy webhook after publishing
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   check:
@@ -48,10 +52,8 @@ jobs:
         run: composer test
 
   assemble:
-    name: Assemble gateway + services -> build branch
+    name: Assemble gateway + services
     needs: check
-    # Skip on PRs; run on push to main, manual dispatch, or an API ping.
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -225,18 +227,20 @@ jobs:
       - name: Generate API wiki
         run: php _src/gateway/bin/gen-api-wiki.php dist
 
-      - name: Publish to build branch
+      - name: Publish to ${{ inputs.channel }} branch
         uses: peaceiris/actions-gh-pages@v4
         with:
-          # Despite the field name, this is the org PAT (repo scope), matching
-          # the frontend build-branch convention — not the default GITHUB_TOKEN.
+          # Despite the field name, this is the org PAT (repo scope) — it must
+          # check out the private API repos AND push the artifact branch, which
+          # the default GITHUB_TOKEN can't do across repos.
           github_token: ${{ secrets.ASSEMBLE_TOKEN }}
-          publish_branch: build
+          publish_branch: ${{ inputs.channel }}
           publish_dir: ./dist
           force_orphan: true
-          commit_message: "build: assemble gateway + services (${{ github.event_name }})"
+          commit_message: "${{ inputs.channel }}: assemble gateway + services"
 
       - name: Trigger deploy webhook
+        if: ${{ inputs.deploy }}
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
         run: |
