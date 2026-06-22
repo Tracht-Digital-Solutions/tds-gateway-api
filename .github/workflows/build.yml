@@ -36,8 +36,8 @@ jobs:
       - name: Composer validate
         run: composer validate --no-check-publish
 
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Composer install (cached)
+        uses: ramsey/composer-install@v3
 
       - name: PHP syntax check
         run: |
@@ -101,6 +101,13 @@ jobs:
           extensions: curl, openssl, pdo_mysql, mbstring
           coverage: none
           tools: composer:v2
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-assemble-${{ hashFiles('_src/*/composer.json') }}
+          restore-keys: composer-assemble-
 
       - name: Install dependencies (production only)
         run: |
