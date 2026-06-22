@@ -32,7 +32,7 @@ inside one repo at a time.
 |---|---|---|
 | `tds-auth-api` | `/auth` (port 8003) | RS256 JWT issuance + JWKS; sessions |
 | `tds-contact-api` | `/contact` (port 8002) | Contact form → Resend email + rate limit |
-| `tds-content-api` | `/content` (port 8001) | `blog_post` table; blog CRUD |
+| `tds-content-api` | `/content` (port 8001) | `blog_post` table (blog CRUD) + `content_block` table (editable landingpage section content, `/landing`) |
 | `tds-customer-api` | `/customer` (port 8004) | Customers, projects, invoices (Stripe), docs, time tracking |
 
 **API gateway — PHP 8.3 + Slim 4 (transparent reverse proxy):**
@@ -74,6 +74,13 @@ inside one repo at a time.
   Currently sections fetch posts from `tds-content-api` during `astro build` and bake the
   HTML. A failed fetch returns `[]` and the page falls back to static content — the build
   never breaks on an API hiccup. Do not fetch this content from the client at runtime.
+  Two newer build-time content paths follow the same rule: (1) the **landingpage content
+  editor** — most landingpage sections are editable via `tds-content-api`'s `/landing`
+  content-block API, edited in `tds-admin`, pulled by `tds-landingpage`'s `src/lib/cms.ts`
+  at build time (merged over the tds-shared/local default; a save fires a rebuild). (2)
+  **blog English versions** — every post is reachable in DE (`/[slug]`) and EN
+  (`/en/[slug]`); a post lacking a language is DeepL-translated at build time (graceful
+  fallback when `DEEPL_API_KEY` is unset). Both bake static HTML — no runtime fetch.
 - **`tds-shared` is the single source of truth for design + copy.** Brand tokens live in
   `styles/base.css` (`@theme` block), shared chrome in `styles/app.css`. To change a color,
   font, shared component style, or any editable copy string: edit it in `tds-shared`, bump
@@ -150,13 +157,21 @@ expired token; a 403 `read_package` despite a valid token = missing SSO authoriz
 
 Deployment is automatic and host-agnostic. On push to `main`:
 - **Frontends** build `dist/`, force-push it to an orphan `build` branch (one commit per
-  run), then GET-ping `DEPLOY_WEBHOOK_URL` so the production host pulls and goes live.
-- **Backends** run CI, then the `deploy` job pings `DEPLOY_WEBHOOK_URL`; the host pulls the
-  new source and runs `composer install` + migrations on activation.
+  run), then GET-ping `DEPLOY_WEBHOOK_URL` so the production host pulls and goes live. Each
+  frontend builds **once per push** (`build.yml` owns push; `ci.yml` is PR-only).
+- **Backends** run CI (Composer deps cached), then the `deploy` job pings
+  `DEPLOY_WEBHOOK_URL`; the host pulls the new source and runs `composer install` +
+  migrations on activation.
 
 So: don't commit `vendor/` (the deploy hook installs it), and don't commit
 `tds-auth-api/keys/private.pem` (gitignored; lives only in a password manager + the host
 `.env`). The deploy token is carried inside `DEPLOY_WEBHOOK_URL` itself.
+
+**Newer deploy secrets** (optional; no-op/fallback when unset): `LANDINGPAGE_REBUILD_*` on
+`tds-content-api` (a `/landing` save triggers a landingpage rebuild) and `DEEPL_API_KEY` on
+`tds-blog` (build-time fallback translation). Cross-repo **reusable GitHub workflows are
+org-blocked** — deploy/dispatch shell stays inline per repo; the frontend
+`npm install --no-package-lock` is required (Windows lockfile is win32-only).
 
 ## Cross-cutting conventions & gotchas
 
