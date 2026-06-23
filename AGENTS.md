@@ -41,22 +41,29 @@ backends — read the root `CLAUDE.md` for the big picture.
   Fine for current upload sizes (blog covers, customer docs); revisit with
   streaming if large uploads land.
 
-## The build pipeline (`.github/workflows/build.yml`)
+## The build pipeline (`dev.yml` / `release.yml` → reusable `_assemble.yml`)
 
-- `check` job: validate + install + `php -l` + phpunit (runs on PRs too).
-- `assemble` job (not on PRs): checks out the gateway + all four API repos at
-  `main`, runs `composer install --no-dev` for each, **re-adds phinx per
-  service** (`composer require robmorgan/phinx:<require-dev constraint>
-  --update-no-dev`) so the host can run migrations from the bundle without a
-  composer install, assembles `dist/` (gateway at root, services under
-  `services/`, plus Procfile / services.json / BUILD_INFO.json), force-pushes
-  to the orphan `build` branch, then pings `DEPLOY_WEBHOOK_URL`.
+The old single `build.yml`/`build`-branch is gone — there are now two thin
+caller workflows over a same-repo reusable `_assemble.yml` (`workflow_call`):
+- **`dev.yml`** — triggers: push to `main`, `workflow_dispatch`,
+  `repository_dispatch(api-pushed)`. Calls `_assemble` with `channel=dev,
+  deploy=false` → force-pushes the bundle to the orphan **`dev`** branch. **Not
+  deployed.**
+- **`release.yml`** — `workflow_dispatch` only. Calls `_assemble` with
+  `channel=release, deploy=true` → force-pushes **`release`** + pings
+  `DEPLOY_WEBHOOK_URL`. The host pulls `release`.
+- `_assemble.yml`: `check` (validate + install + `php -l` + phpunit) then
+  `assemble` — checks out the gateway + all four API repos at `main`, runs
+  `composer install --no-dev` for each, **re-adds phinx per service**
+  (`composer require robmorgan/phinx:<require-dev constraint> --update-no-dev`)
+  so the host can migrate from the bundle without a composer install, assembles
+  `dist/` (gateway at root, services under `services/`, plus Procfile /
+  services.json / BUILD_INFO.json), and publishes to the `inputs.channel` branch
+  (deploy ping gated on `inputs.deploy`). PR merge-gate is the separate `ci.yml`.
 - `public/.htaccess` ships the Apache front-controller rewrite (same file as
   the four APIs) so the gateway can run straight under PHP-FPM with the
   docroot on `gateway/public` — the Plesk model in `DEPLOY-PLESK.md`. Without
   it every route except `/` 404s on Apache hosts.
-- Triggers: push to this repo's `main`, `workflow_dispatch`, and
-  `repository_dispatch` (`api-pushed`) sent by each API repo's CI.
 
 ### End-to-end wiring (gateway ↔ the four API repos)
 
@@ -64,27 +71,26 @@ The auto-reassembly loop spans two halves; both are live and verified.
 
 1. **API side** — each API repo (`tds-auth-api`, `tds-contact-api`,
    `tds-content-api`, `tds-customer-api`) has its own
-   `.github/workflows/ci.yml`: a `check` job (validate + install + `php -l` +
-   phpunit) and, on push to `main`, a `deploy` job that pings
-   `DEPLOY_WEBHOOK_URL` **and** POSTs an `api-pushed` `repository_dispatch` to
-   this repo (`.../tds-api-gateway/dispatches`) using `GATEWAY_DISPATCH_TOKEN`.
-   The dispatch step skips quietly (logs + `exit 0`) when the token is unset,
-   so a missing secret never reds the API's CI — it just silently stops
-   reassembling the gateway. The four `ci.yml` files are identical except the
-   PHP `extensions:` list (auth: `openssl`; customer: `openssl, fileinfo`).
-2. **Gateway side** — the `repository_dispatch(api-pushed)` trigger above fires
-   the `assemble` job, which rebuilds the bundle from all five repos at `main`
-   and force-pushes `build`. So a push to *any* API ⇒ that API's CI ⇒ dispatch
-   ⇒ gateway reassembles. A push to the gateway itself reassembles directly.
+   `dev.yml` / `release.yml` (+ `ci.yml` for PRs). Its **manual Release**
+   (`release.yml`) pings `DEPLOY_WEBHOOK_URL` **and** POSTs an `api-pushed`
+   `repository_dispatch` to this repo (`.../tds-api-gateway/dispatches`) using
+   `GATEWAY_DISPATCH_TOKEN`. The dispatch step skips quietly (logs + `exit 0`)
+   when the token is unset, so a missing secret never reds the API's CI. The
+   four repos' workflows are identical except the PHP `extensions:` list
+   (auth: `openssl`; customer: `openssl, fileinfo`).
+2. **Gateway side** — the `repository_dispatch(api-pushed)` trigger fires
+   `dev.yml`, which rebuilds the **`dev`** bundle from all five repos at `main`.
+   So an API release ⇒ dispatch ⇒ gateway `dev` reassembles. The gateway's own
+   `release` is a separate manual button.
 
 To test the chain without an API push:
 `gh api -X POST repos/Tracht-Digital-Solutions/tds-api-gateway/dispatches
 -f event_type=api-pushed` — then confirm a `repository_dispatch`-triggered
-run lands and the `build` branch SHA advances.
+`dev` run lands and the `dev` branch SHA advances.
 
 **The deploy-webhook ping is deliberately non-fatal — don't "fix" it back to
 `curl -fsS`.** By the time that step runs, the bundle is already force-pushed
-to `build`, so a wrong/expired/unreachable `DEPLOY_WEBHOOK_URL` (404, timeout,
+to the channel branch, so a wrong/expired/unreachable `DEPLOY_WEBHOOK_URL` (404, timeout,
 DNS) must not red the job and mask a good assembly. The step captures the HTTP
 status (`-w '%{http_code}'`, `|| echo 000` for a connect failure) and emits a
 `::warning::` annotation on a non-2xx instead of exiting non-zero. So a broken
@@ -96,7 +102,7 @@ softening is mirrored in all four API repos' `ci.yml`.
 
 | Secret | Where | Purpose | Status |
 |---|---|---|---|
-| `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `build` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
+| `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `dev`/`release` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
 | `GATEWAY_DISPATCH_TOKEN` | each of the 4 API repos | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set in all 4 |
 | `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | Wire to the host's deploy hook once its URL is known; while unset or misconfigured the ping just skips / warns and never reds the job. |
 
@@ -136,7 +142,7 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   disabled) and uses `ext-openssl` directly for the auth keypair.
 - Path model: it lives at `<bundle>/gateway/public/install.php` and resolves
   `<bundle>/services/<name>` two levels up; shows a "bundle not assembled"
-  guard when run outside the `build` bundle (e.g. the dev repo).
+  guard when run outside the assembled bundle (e.g. the dev repo).
 - Writes `services/<name>/.env` (+ gateway `.env`) from the same templates as
   the `.env.example`s / `deploy/docker-entrypoint.sh`; keep all three in sync
   when a service gains an env var.

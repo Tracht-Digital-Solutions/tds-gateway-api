@@ -58,8 +58,9 @@ inside one repo at a time.
   `.../contact` with no sub-path), so the gateway rewrites `/contact`→`:8002/contact`. CORS
   stays owned by each upstream — don't add it at the gateway (it'd duplicate the header). CI
   assembles the gateway + all four services into a self-contained bundle on the orphan
-  `build` branch, rebuilt on a gateway push **or** a `repository_dispatch(api-pushed)` from
-  any API repo. Alternatively the host can prefix-route with `deploy/nginx.conf.example`
+  **`dev`** branch (auto, on a gateway push **or** a `repository_dispatch(api-pushed)` from
+  any API repo, NOT deployed); the **`release`** branch + deploy is the manual Actions
+  button. Alternatively the host can prefix-route with `deploy/nginx.conf.example`
   (zero PHP hop) instead of running the gateway process.
 - **Auth is centralized in `tds-auth-api`.** It signs RS256 JWTs; every other backend
   verifies them via `/.well-known/jwks.json` and never sees the private key. Cookies are
@@ -150,20 +151,27 @@ See each repo's `INSTALL.md` for the full recipe.
 without a classic PAT carrying `read:packages` (and SSO-authorized for the
 `Tracht-Digital-Solutions` org). Provide it via `~/.npmrc` or the `NPM_TOKEN` env var that
 the repo `.npmrc` references. In CI, `secrets.NPM_TOKEN` is the PAT used both to install
-from Packages and to push the build branch — not `secrets.GITHUB_TOKEN`. A 401 = missing/
+from Packages and to push the `dev`/`release` branch — not `secrets.GITHUB_TOKEN`. A 401 = missing/
 expired token; a 403 `read_package` despite a valid token = missing SSO authorization.
 
 ## Deployment (don't break the pipeline)
 
-Deployment is automatic and host-agnostic. On push to `main`:
-- **Frontends** build `dist/`, force-push it to an orphan `build` branch (one commit per
-  run), then GET-ping `DEPLOY_WEBHOOK_URL` so the production host pulls and goes live. Each
-  frontend builds **once per push** (`build.yml` owns push; `ci.yml` is PR-only).
-- **Backends** run CI (Composer deps cached), then the `deploy` job pings
-  `DEPLOY_WEBHOOK_URL`; the host pulls the new source and runs `composer install` +
-  migrations on activation.
+**Two-track branch model (replaced the old `build` branch).** Every repo has a **`dev`**
+branch (developer version, **auto-built on every push to `main`**, NOT deployed) and a
+**`release`** branch (production, **only on the manual Actions button**). The host pulls
+**`release`**; the deploy webhook fires **only on a release run**. `ci.yml` is PR-only.
+- **Frontends** (`dev.yml`/`release.yml`): build `dist/` → `dev` (Staging/Demo config,
+  `PUBLIC_DEMO_MODE=true`) / `release` (real URLs, deploy ping).
+- **Backends** (`dev.yml`/`release.yml` + `.github/assemble-bundle.sh`): bundle source +
+  `vendor/` + phinx → `dev` / `release`; only release deploys + dispatches the gateway.
+- **Gateway** (`dev.yml`/`release.yml` → reusable `_assemble.yml`): assemble gateway + 4
+  services → `dev` (push / `api-pushed` dispatch) / `release` (manual).
+- **tds-shared**: push → `@dev` prerelease; manual Release button → real version publish.
 
-So: don't commit `vendor/` (the deploy hook installs it), and don't commit
+Host cutover: repoint each property's Git pull from `build` → **`release`** and press each
+Release button once so `release` exists.
+
+So: don't commit `vendor/` (the bundle installs it), and don't commit
 `tds-auth-api/keys/private.pem` (gitignored; lives only in a password manager + the host
 `.env`). The deploy token is carried inside `DEPLOY_WEBHOOK_URL` itself.
 

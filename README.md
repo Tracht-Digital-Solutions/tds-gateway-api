@@ -70,15 +70,22 @@ composer start           # php -S localhost:8000 -t public
 composer test            # phpunit
 ```
 
-## Build & deploy — the `build` branch
+## Build & deploy — `dev` / `release` branches
 
-CI assembles a **self-contained deployable bundle** and force-pushes it to the
-orphan `build` branch (one commit per run), then pings `DEPLOY_WEBHOOK_URL` —
-mirroring the frontend pipeline. The bundle is the gateway plus all four
-services (each with `vendor/`) and a process manifest:
+CI assembles a **self-contained deployable bundle** (gateway + all four
+services, each with `vendor/`). Two tracks (the old `build` branch is gone):
+
+- **`dev`** — [`dev.yml`](.github/workflows/dev.yml) → reusable
+  [`_assemble.yml`](.github/workflows/_assemble.yml): assembles to the orphan
+  **`dev`** branch on every push or an `api-pushed` dispatch. **Not deployed.**
+- **`release`** — [`release.yml`](.github/workflows/release.yml): assembles to
+  the **`release`** branch **only on the manual Actions button**, then pings
+  `DEPLOY_WEBHOOK_URL`. The host pulls **`release`**.
+
+The bundle layout (same for both branches):
 
 ```
-build/
+release/
   gateway/            # this repo, with vendor/
   services/{auth,contact,content,customer}/   # each API, with vendor/
   Procfile            # one process per service (+ gateway), with ports

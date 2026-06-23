@@ -11,8 +11,10 @@ Sobald du das Bundle ausgecheckt und einmal eingerichtet hast, startet
 
 ## Was im Bundle steckt
 
-Der `build`-Branch dieses Repos wird von CI assembliert und enthält alles,
-inklusive aller `vendor/`-Verzeichnisse (auch Phinx für Migrationen):
+Der `release`-Branch dieses Repos wird von CI assembliert und enthält alles,
+inklusive aller `vendor/`-Verzeichnisse (auch Phinx für Migrationen). Der alte
+`build`-Branch existiert nicht mehr; `dev` ist die nicht-deployte Developer-
+Version, `release` (manueller Knopf) ist das, was der Host zieht:
 
 ```
 gateway/                ← Slim-Proxy (Docroot: gateway/public, Port 8000)
@@ -140,8 +142,10 @@ fehlende `php -S`-Prozess steht dann im Watchdog-Log.
 
 ## 7. Updates / Deploy-Webhook
 
-CI baut den `build`-Branch nach jedem `main`-Push (Gateway **oder** eine der
-vier APIs) neu und pingt `DEPLOY_WEBHOOK_URL`. Der Host muss darauf
+CI baut den `dev`-Branch nach jedem `main`-Push (Gateway **oder** eine der vier
+APIs, per `api-pushed`-Dispatch) automatisch — ohne Deploy. Der `release`-Branch
+wird **nur per manuellem Actions-Knopf** gebaut und pingt dann
+`DEPLOY_WEBHOOK_URL`. Der Host zieht `release` und muss darauf
 `git pull` + `bin/migrate-stack.sh` + Service-Neustart ausführen, z. B.:
 
 ```bash

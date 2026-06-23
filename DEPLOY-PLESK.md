@@ -6,17 +6,20 @@ Sie deckt **alle fünf Web-Properties** ab: vier statische Frontends und das
 API-Bundle, das Gateway + alle vier PHP-Services als **ein Plesk-Projekt**
 (eine Subdomain, ein Git-Checkout) deployt.
 
-Alle Repos veröffentlichen ihr deploybares Artefakt auf einem orphan
-**`build`-Branch** (CI force-pusht nach jedem grünen `main`-Push). Plesk zieht
-immer nur diesen Branch — nie `main`.
+Jedes Repo hat zwei Artefakt-Branches (der alte `build`-Branch existiert nicht
+mehr): **`dev`** (Developer-Version, CI baut sie automatisch nach jedem
+`main`-Push, **wird nicht deployt**) und **`release`** (Produktion, **nur per
+manuellem Actions-Knopf** *Release → Run workflow*). **Plesk zieht immer den
+`release`-Branch** — nie `main`, nie `dev`. Vor dem ersten Pull also je Repo
+einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 
 | (Sub)Domain | Repo | Branch | Art |
 |---|---|---|---|
-| `tracht-digital.de` | `tds-landingpage` | `build` | statisch (HTML/CSS/JS) |
-| `blog.tracht-digital.de` | `tds-blog` | `build` | statisch |
-| `admin.tracht-digital.de` | `tds-admin` | `build` | statisch |
-| `app.tracht-digital.de` | `tds-customer` | `build` | statisch |
-| `api.tracht-digital.de` | `tds-api-gateway` | `build` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
+| `tracht-digital.de` | `tds-landingpage` | `release` | statisch (HTML/CSS/JS) |
+| `blog.tracht-digital.de` | `tds-blog` | `release` | statisch |
+| `admin.tracht-digital.de` | `tds-admin` | `release` | statisch |
+| `app.tracht-digital.de` | `tds-customer` | `release` | statisch |
+| `api.tracht-digital.de` | `tds-api-gateway` | `release` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
 
 ---
 
@@ -45,22 +48,23 @@ angezeigten öffentlichen Schlüssel im jeweiligen GitHub-Repo unter
 
 Für jede der vier Frontend-(Sub)Domains identisch:
 
-1. *Git → Repository hinzufügen*: Repo-URL, **Branch `build`**, Deploy-Modus
+1. *Git → Repository hinzufügen*: Repo-URL, **Branch `release`**, Deploy-Modus
    „automatisch", Zielpfad = Docroot der (Sub)Domain.
 2. *Hosting-Einstellungen*: **PHP deaktivieren** (rein statische Auslieferung),
    bevorzugt „nginx direkt ausliefern" für statische Dateien.
 3. **Deploy-Webhook verdrahten**: Die Git-Extension zeigt eine
    *Webhook-URL* („Repository aktualisieren") an. Diese URL als Secret
    `DEPLOY_WEBHOOK_URL` im **jeweiligen Frontend-Repo** auf GitHub hinterlegen.
-   Die CI pingt sie per GET nach jedem `build`-Push — Plesk pullt dann und die
-   Seite ist live. (Der Token steckt in der URL selbst; nirgendwo sonst ablegen.)
+   Die CI pingt sie per GET nach jedem **Release** (nicht auf `dev`) — Plesk pullt
+   dann und die Seite ist live. (Der Token steckt in der URL selbst; nirgendwo
+   sonst ablegen.)
 4. `admin.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
    zusätzlich abdichten will, legt in Plesk eine IP-Beschränkung oder BasicAuth
    davor (optional).
 
 ## 4. `api.tracht-digital.de` — das API-Bundle als ein Projekt
 
-Der `build`-Branch dieses Repos enthält das von CI assemblierte Bundle:
+Der `release`-Branch dieses Repos enthält das von CI assemblierte Bundle:
 
 ```
 gateway/            ← Slim-Proxy (Docroot zeigt auf gateway/public)
@@ -77,7 +81,7 @@ Alle `vendor/`-Verzeichnisse sind enthalten (inkl. Phinx für Migrationen) —
 ### 4.1 Git + Docroot
 
 1. *Git → Repository hinzufügen* auf der Subdomain `api.`: dieses Repo,
-   **Branch `build`**, Zielpfad = Docroot-Verzeichnis der Subdomain
+   **Branch `release`**, Zielpfad = Docroot-Verzeichnis der Subdomain
    (z. B. `api.tracht-digital.de`-Ordner).
 2. *Hosting-Einstellungen*: **Docroot auf `<zielpfad>/gateway/public`** stellen,
    PHP 8.3 (FPM) aktivieren.
@@ -196,15 +200,17 @@ Bundle gebaut wurde.
 
 1. ☐ DNS-Records anlegen, warten bis sie auflösen.
 2. ☐ Plesk: Hauptdomain + 4 Subdomains + Let's Encrypt + HTTPS-Redirect.
-3. ☐ `api.`: Git-Checkout (`build`), Docroot auf `gateway/public`, DBs + DB-User,
+3. ☐ **In allen 5 Repos einmal den `release`-Workflow** (*Actions → Release → Run
+   workflow*) ausführen, damit der `release`-Branch existiert.
+4. ☐ `api.`: Git-Checkout (`release`), Docroot auf `gateway/public`, DBs + DB-User,
    `.env`-Dateien + `private.pem`, Migrationen, Service-Prozesse starten,
    Deploy-Aktionen + Webhook-Secret setzen, `/healthz` grün.
-4. ☐ Frontends: Git-Checkout (`build`) je Subdomain, PHP aus,
+5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
    Webhook-Secrets in den vier Frontend-Repos setzen.
-5. ☐ **`tds-blog` neu bauen** (Workflow „Build" manuell dispatchen), sobald die
+6. ☐ **`tds-blog` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
    API live ist — die statischen Blog-Seiten backen ihre Artikel zur Build-Zeit
    und sind bis dahin leer (siehe Issue #1).
-6. ☐ End-to-End prüfen: Login `admin.`, Login `app.`, Kontaktformular auf der
+7. ☐ End-to-End prüfen: Login `admin.`, Login `app.`, Kontaktformular auf der
    Hauptdomain, Blog-Artikel sichtbar.
 
 ## Stolperfallen

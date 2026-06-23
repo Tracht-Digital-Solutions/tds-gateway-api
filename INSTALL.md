@@ -38,8 +38,8 @@ composer test
 
 | Secret | Purpose |
 |---|---|
-| `ASSEMBLE_TOKEN` | Classic PAT, `repo` scope, SSO-authorized for the org. Used to (a) checkout the four private API repos and (b) force-push the `build` branch. |
-| `DEPLOY_WEBHOOK_URL` | Optional. Pinged after the `build` branch is updated so the host pulls and goes live. |
+| `ASSEMBLE_TOKEN` | Classic PAT, `repo` scope, SSO-authorized for the org. Used to (a) checkout the four private API repos and (b) force-push the `dev`/`release` branch. |
+| `DEPLOY_WEBHOOK_URL` | Optional. Pinged after the `release` branch is updated (only on a manual Release run) so the host pulls and goes live. |
 
 ### Each API repo (`tds-auth-api`, `tds-contact-api`, `tds-content-api`, `tds-customer-api`)
 
@@ -49,9 +49,11 @@ composer test
 
 ## 3. Production host
 
-Deploy is host-agnostic, like the other repos: on a successful build the
-`build` branch is force-pushed and `DEPLOY_WEBHOOK_URL` is pinged. The host
-checks out `build` and runs the bundle.
+Deploy is host-agnostic, like the other repos. Two branches (the old `build`
+branch is gone): every push to `main` (or an `api-pushed` dispatch) auto-builds
+the **`dev`** branch (not deployed); the manual *Actions → Release* button builds
+the **`release`** branch and pings `DEPLOY_WEBHOOK_URL`. The host checks out
+**`release`** and runs the bundle.
 
 > **Plesk:** the full click-by-click release guide (domains, subdomains,
 > SSL, the single-project API deploy, webhooks) is in
@@ -82,7 +84,10 @@ same shared admin token; unset leaves the wiki disabled/404).
 
 ## 4. Verifying the pipeline
 
-- Push to this repo's `main` → `build` branch updates.
-- Push to any API repo → its CI sends `repository_dispatch` → this repo's
-  Build workflow runs `assemble` → `build` branch updates with the new API.
-- Check `BUILD_INFO.json` on the `build` branch for the source commit SHAs.
+- Push to this repo's `main` → `dev.yml` runs `assemble` → `dev` branch updates
+  (not deployed).
+- Push to any API repo (manual Release) → its CI sends `repository_dispatch` →
+  this repo's `dev.yml` runs `assemble` → `dev` branch updates with the new API.
+- Press *Actions → Release* here → `release.yml` runs `assemble` → `release`
+  branch updates + `DEPLOY_WEBHOOK_URL` is pinged.
+- Check `BUILD_INFO.json` on the `dev`/`release` branch for the source commit SHAs.

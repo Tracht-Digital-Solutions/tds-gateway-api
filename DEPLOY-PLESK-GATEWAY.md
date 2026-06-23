@@ -11,6 +11,12 @@ PHP-FPM aus, die vier Services laufen als lokale `php -S`-Prozesse, und
 `bin/start-stack.sh` hält sie am Leben. **Sobald das Bundle ausgecheckt und
 eingerichtet ist, laufen die vier APIs automatisch mit.**
 
+> **Branch-Modell (seit Umstellung):** Der Host pullt den **`release`**-Branch
+> (Production-Bundle). `release` wird **nur per Knopfdruck** gebaut
+> (Actions → *Release assemble → release branch* → *Run workflow*). Der
+> `dev`-Branch ist das automatisch nach jedem Push gebaute Entwickler-Bundle
+> (nicht für Production). Den alten `build`-Branch gibt es nicht mehr.
+
 ## 1. Subdomain + SSL
 
 1. `api.tracht-digital.de` als Subdomain anlegen (eigenes Docroot).
@@ -18,17 +24,21 @@ eingerichtet ist, laufen die vier APIs automatisch mit.**
    Die Subdomain muss unter `.tracht-digital.de` liegen (Cookie-Domain).
 3. PHP **8.3 (FPM)** für die Subdomain aktivieren.
 
-## 2. Git-Checkout des `build`-Branch
+## 2. Git-Checkout des `release`-Branch
 
 Das Repo ist privat → in der Plesk-Git-Extension per **SSH-URL** einbinden
 (`git@github.com:Tracht-Digital-Solutions/tds-api-gateway.git`), den von Plesk
 angezeigten Public Key im Repo unter *Settings → Deploy keys* (read-only)
 hinterlegen.
 
-- *Git → Repository hinzufügen*: dieses Repo, **Branch `build`**, Zielpfad =
+- *Git → Repository hinzufügen*: dieses Repo, **Branch `release`**, Zielpfad =
   Docroot-Verzeichnis der Subdomain.
 
-Der `build`-Branch enthält Gateway + `services/{auth,contact,content,customer}`
+> Den `release`-Branch gibt es erst nach dem ersten Production-Build: einmal
+> *Actions → „Release assemble → release branch" → Run workflow* ausführen,
+> dann ist er da.
+
+Der `release`-Branch enthält Gateway + `services/{auth,contact,content,customer}`
 mit allen `vendor/` (inkl. Phinx). **Auf dem Host läuft kein `composer
 install`.**
 
@@ -99,10 +109,11 @@ PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/start-stack.sh
 ```
 
 Die *Webhook-URL* dieser Git-Instanz als Secret `DEPLOY_WEBHOOK_URL` **im
-tds-api-gateway-Repo** hinterlegen — und nur dort. Ein Push in ein API-Repo
-feuert per `repository_dispatch` den Assemble-Workflow des Gateways, der den
-`build`-Branch neu baut und den Webhook pingt; Plesk pullt und führt die
-Bereitstellungsaktionen aus.
+tds-api-gateway-Repo** hinterlegen — und nur dort. Der Webhook wird **nur beim
+Production-Build** gepingt (Actions → *Release assemble → release branch*), der
+das `release`-Bundle baut; Plesk pullt `release` und führt die
+Bereitstellungsaktionen aus. Ein Push in ein API-Repo baut nur das `dev`-Bundle
+neu (kein Deploy) — Production geht immer über den Release-Knopf.
 
 ## 7. Verifikation
 
