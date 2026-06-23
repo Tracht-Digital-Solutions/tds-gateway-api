@@ -84,4 +84,15 @@ final class WikiActionTest extends TestCase
         self::assertSame('/wiki', $res->getHeaderLine('Location'));
         self::assertStringContainsString('tds_wiki=', $res->getHeaderLine('Set-Cookie'));
     }
+
+    public function testAuthedButMissingWikiFileReturns503(): void
+    {
+        // Remove the generated wiki so only the fallback path remains.
+        @unlink($this->dir . '/wiki/index.html');
+        @rmdir($this->dir . '/wiki');
+
+        $res = $this->get(new WikiAction('secret', $this->dir), ['bearer' => 'secret']);
+        self::assertSame(503, $res->getStatusCode());
+        self::assertStringContainsString('bin/gen-api-wiki.php', (string) $res->getBody());
+    }
 }

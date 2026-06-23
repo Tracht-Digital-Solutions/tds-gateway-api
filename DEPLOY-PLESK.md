@@ -64,7 +64,23 @@ Für jede der vier Frontend-(Sub)Domains identisch:
 
 ## 4. `api.tracht-digital.de` — das API-Bundle als ein Projekt
 
-Der `release`-Branch dieses Repos enthält das von CI assemblierte Bundle:
+Gateway + alle vier Services laufen als **ein** Plesk-Projekt (eine Subdomain,
+ein Git-Checkout). Für die PHP-Abhängigkeiten gibt es zwei Wege — dieser
+Plesk-Host bringt einen **eingebauten PHP-Composer** mit
+(*Websites & Domains → PHP Composer*), du bist also nicht auf das vorgebaute
+Bundle angewiesen:
+
+- **A — `release`-Bundle (empfohlen, kein Composer-Schritt).** Der
+  `release`-Branch enthält Gateway + `services/{auth,contact,content,customer}`
+  inklusive aller `vendor/` (mit Phinx). Auschecken, fertig — Plesk muss nichts
+  installieren.
+- **B — `main` + Plesk-Composer.** Statt des Bundles den `main`-Branch
+  auschecken und in Plesk unter *PHP Composer* einmal `composer install
+  --no-dev` für das Gateway **und** für jeden `services/<name>/` ausführen.
+  Praktisch, wenn du ohne den Release-Knopf direkt vom Quellstand deployen
+  willst; sonst identisch zu Weg A.
+
+Bundle-Layout (`release`-Branch):
 
 ```
 gateway/            ← Slim-Proxy (Docroot zeigt auf gateway/public)
@@ -75,14 +91,12 @@ services/customer/  ← tds-customer-api  (Port 8004)
 Procfile, services.json, BUILD_INFO.json
 ```
 
-Alle `vendor/`-Verzeichnisse sind enthalten (inkl. Phinx für Migrationen) —
-**auf dem Host läuft kein `composer install`.**
-
 ### 4.1 Git + Docroot
 
 1. *Git → Repository hinzufügen* auf der Subdomain `api.`: dieses Repo,
-   **Branch `release`**, Zielpfad = Docroot-Verzeichnis der Subdomain
-   (z. B. `api.tracht-digital.de`-Ordner).
+   **Branch `release`** (Weg A) bzw. **`main`** (Weg B — danach in Plesk
+   *PHP Composer* `composer install --no-dev` pro `services/<name>/` + Gateway),
+   Zielpfad = Docroot-Verzeichnis der Subdomain (z. B. `api.tracht-digital.de`-Ordner).
 2. *Hosting-Einstellungen*: **Docroot auf `<zielpfad>/gateway/public`** stellen,
    PHP 8.3 (FPM) aktivieren.
 
@@ -125,10 +139,23 @@ for svc in auth:8003 contact:8002 content:8001 customer:8004; do
 done
 ```
 
+Das Bundle bringt dieses Skript bereits mit: **`gateway/bin/start-stack.sh`**
+(idempotent, Watchdog-tauglich) — statt das obige selbst zu schreiben, einfach
+`PHP_BIN=/opt/plesk/php/8.3/bin/php <zielpfad>/gateway/bin/start-stack.sh`
+aufrufen.
+
 In Plesk unter *Geplante Aufgaben* zweimal eintragen: einmal `@reboot`, einmal
 alle 5 Minuten (Watchdog — startet abgestürzte Prozesse neu).
 
 ### 4.3 `.env` + Schlüssel je Service
+
+> **Schnellweg (Web-Installer):** Sobald der Docroot steht (4.1), erledigt der
+> mitgelieferte Assistent unter **`https://api.tracht-digital.de/install.php`**
+> die Punkte 4.3 + 4.4 auf einmal: DB-Verbindung testen/anlegen, alle
+> `services/<name>/.env` schreiben, das Auth-RS256-Keypair erzeugen und die
+> Migrationen ausführen. Danach **`gateway/public/install.php` löschen** (der
+> Assistent bietet das selbst an) und ihn während der Einrichtung per
+> IP/Passwort schützen. Wer es lieber von Hand macht, folgt 4.3 + 4.4.
 
 Jeder Service braucht seine eigene `.env` **im Service-Ordner des Checkouts**
 (`services/<name>/.env`, Vorlage: `services/<name>/.env.example`). `.env`-Dateien
@@ -161,6 +188,9 @@ for name in auth contact content customer; do
   (cd "services/$name" && /opt/plesk/php/8.3/bin/php vendor/bin/phinx migrate -e production)
 done
 ```
+
+   Bequemer: das mitgelieferte `gateway/bin/migrate-stack.sh` macht genau diese
+   Schleife — `PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/migrate-stack.sh`.
 
 ### 4.5 Deploy-Aktionen + Webhook
 

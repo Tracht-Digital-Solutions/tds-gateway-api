@@ -15,8 +15,17 @@ backends — read the root `CLAUDE.md` for the big picture.
   services and `/contact` for contact-api.
 - `Action\ProxyAction` is a catch-all (`/{path:.*}`). It relays the request
   via `Http\ProxyClientInterface` (cURL impl) and mirrors the response.
-- `Action\HealthAction` fans out to every upstream `/healthz`;
-  `Action\IndexAction` lists prefixes for navigation.
+- `Action\HealthAction` fans out to every upstream `/healthz` **concurrently**
+  via `ProxyClientInterface::sendMany()` (curl_multi), so one slow/dead upstream
+  can't serialise the check; a transport failure comes back as a status-0
+  response (reported as down). `Action\IndexAction` lists prefixes for
+  navigation.
+- `Http\ProxyClientInterface` has two methods: `send()` (single, used by
+  `ProxyAction`, throws `ProxyException` on transport failure) and `sendMany()`
+  (concurrent batch, used by `HealthAction`, never throws — failures are
+  status-0). Two instances are wired in `Bootstrap`: a long-timeout
+  `proxy.client` for proxied traffic and a short-timeout `health.client`
+  (connect 1s / total 2s) so `/healthz` stays snappy.
 - `Http\HeaderFilter` strips hop-by-hop + Host + Content-Length (recomputed
   from the body we hold).
 

@@ -4,16 +4,16 @@
 > Slim-Routendefinitionen der Services. Nicht von Hand bearbeiten — neue
 > Routen erscheinen beim nächsten Build automatisch.
 
-Öffentliche Basis-URL: `https://api.tracht-digital.de` · Stand: 2026-06-15 06:00 UTC · 53 Routen
+Öffentliche Basis-URL: `https://api.tracht-digital.de` · Stand: 2026-06-23 10:10 UTC · 58 Routen
 
 Auth-Spalte: **öffentlich** (kein Gate) · **Admin-Token** (Bearer `ADMIN_TOKEN`) · **JWT** (Customer-Cookie/Bearer, JWKS-verifiziert) · **Customer-JWT** (Login-Session).
 
 ## Inhalt
 
-- [API-Gateway](#api-gateway) — 2 Routen
+- [API-Gateway](#api-gateway) — 3 Routen
 - [Auth-API](#auth-api) — 10 Routen
 - [Contact-API](#contact-api) — 2 Routen
-- [Content-API](#content-api) — 11 Routen
+- [Content-API](#content-api) — 15 Routen
 - [Customer-API](#customer-api) — 28 Routen
 
 ## API-Gateway
@@ -26,6 +26,7 @@ _Quelle: `src/Bootstrap.php`_
 |---|---|---|---|
 | `GET` | `/` | öffentlich | `IndexAction` |
 | `GET` | `/healthz` | öffentlich | `HealthAction` |
+| `GET` | `/wiki` | öffentlich | `WikiAction` |
 
 > Alle übrigen Pfade werden anhand des ersten Segments an den passenden
 > Backend-Service weitergeleitet (`/auth/*`, `/content/*`, `/customer/*`,
@@ -77,6 +78,10 @@ _Quelle: `../tds-content-api/src/Bootstrap.php`_
 | `DELETE` | `/content/blog/{slug}` | Admin-Token | `DeleteAction` |
 | `POST` | `/content/blog/{slug}/cover` | Admin-Token | `UploadCoverAction` |
 | `POST` | `/content/blog/{slug}/image` | Admin-Token | `UploadBodyImageAction` |
+| `GET` | `/content/landing` | öffentlich | `LandingListAction` |
+| `GET` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingGetAction` |
+| `PUT` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingPutAction` |
+| `DELETE` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingDeleteAction` |
 | `GET` | `/content/admin/deployments` | Admin-Token | `ListDeploymentsAction` |
 | `POST` | `/content/admin/deployments/{name}/update` | Admin-Token | `TriggerDeploymentAction` |
 | `GET` | `/content/uploads/{slug:[a-z0-9-]+}/{filename:[a-zA-Z0-9._-]+}` | öffentlich | `UploadServeAction` |

@@ -20,6 +20,9 @@ final class FakeProxyClient implements ProxyClientInterface
     /** @var array<string, ProxyResponse> keyed by URL substring, optional */
     private array $byUrl = [];
 
+    /** @var string[] URL substrings that should raise a transport failure */
+    private array $throwNeedles = [];
+
     public function __construct(
         private ProxyResponse $response = new ProxyResponse(200, [], ''),
         private bool $throw = false,
@@ -42,6 +45,12 @@ final class FakeProxyClient implements ProxyClientInterface
         $this->byUrl[$needle] = $response;
     }
 
+    /** Simulate a transport failure when the URL contains $needle. */
+    public function throwWhenUrlContains(string $needle): void
+    {
+        $this->throwNeedles[] = $needle;
+    }
+
     public function send(string $method, string $url, array $headers, string $body): ProxyResponse
     {
         $this->calls++;
@@ -53,11 +62,34 @@ final class FakeProxyClient implements ProxyClientInterface
         if ($this->throw) {
             throw new ProxyException('forced failure');
         }
+        foreach ($this->throwNeedles as $needle) {
+            if (str_contains($url, $needle)) {
+                throw new ProxyException('forced failure for ' . $needle);
+            }
+        }
         foreach ($this->byUrl as $needle => $response) {
             if (str_contains($url, $needle)) {
                 return $response;
             }
         }
         return $this->response;
+    }
+
+    public function sendMany(array $requests): array
+    {
+        $out = [];
+        foreach ($requests as $key => $req) {
+            try {
+                $out[$key] = $this->send(
+                    (string) ($req['method'] ?? 'GET'),
+                    (string) ($req['url'] ?? ''),
+                    (array) ($req['headers'] ?? []),
+                    (string) ($req['body'] ?? ''),
+                );
+            } catch (ProxyException) {
+                $out[$key] = new ProxyResponse(0, [], '');
+            }
+        }
+        return $out;
     }
 }

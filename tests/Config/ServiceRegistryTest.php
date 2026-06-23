@@ -94,4 +94,24 @@ final class ServiceRegistryTest extends TestCase
         $this->expectException(\RuntimeException::class);
         ServiceRegistry::fromEnv($env);
     }
+
+    public function testCustomServiceWithUpstreamRoutes(): void
+    {
+        $env = static fn (string $key, ?string $default = null): string => match ($key) {
+            'GATEWAY_SERVICES' => 'auth,reports',
+            'REPORTS_UPSTREAM' => 'http://127.0.0.1:9100',
+            default => (string) $default,
+        };
+
+        $registry = ServiceRegistry::fromEnv($env);
+        $match = $registry->match('/reports/daily');
+        self::assertNotNull($match);
+        [$service, $remainder] = $match;
+        self::assertSame('reports', $service->prefix);
+        self::assertSame('/daily', $remainder);
+        self::assertSame(
+            'http://127.0.0.1:9100/daily?range=7d',
+            $service->targetFor($remainder, 'range=7d'),
+        );
+    }
 }

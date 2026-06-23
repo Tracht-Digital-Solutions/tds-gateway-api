@@ -106,4 +106,4 @@ Das Image eignet sich auch für Single-Host-Prod: echte Secrets in
 `.env.docker`, einen echten `JWT_PRIVATE_KEY` setzen, einen Reverse-Proxy
 (TLS) vor `API_PORT` hängen und die MariaDB-Daten über das `db-data`-Volume
 sichern. Für den klassischen Plesk-Weg (ohne Docker) siehe
-[`DEPLOY-PLESK-GATEWAY.md`](./DEPLOY-PLESK-GATEWAY.md).
+[`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md).

@@ -45,4 +45,23 @@ final class HeaderFilterTest extends TestCase
         $filtered = HeaderFilter::forResponse(['content-length' => ['9']]);
         self::assertArrayNotHasKey('content-length', $filtered);
     }
+
+    public function testDropsEveryHopByHopHeader(): void
+    {
+        $filtered = HeaderFilter::forResponse([
+            'Proxy-Authenticate' => ['Basic'],
+            'TE' => ['trailers'],
+            'Trailer' => ['Expires'],
+            'Upgrade' => ['h2c'],
+            'Keep-Alive' => ['timeout=5'],
+            'Content-Type' => ['text/plain'],
+        ]);
+
+        self::assertArrayNotHasKey('Proxy-Authenticate', $filtered);
+        self::assertArrayNotHasKey('TE', $filtered);
+        self::assertArrayNotHasKey('Trailer', $filtered);
+        self::assertArrayNotHasKey('Upgrade', $filtered);
+        self::assertArrayNotHasKey('Keep-Alive', $filtered);
+        self::assertSame(['text/plain'], $filtered['Content-Type']);
+    }
 }

@@ -7,7 +7,7 @@ Sobald du das Bundle ausgecheckt und einmal eingerichtet hast, startet
 
 > Für die Container-Variante (ein Befehl, alles läuft) siehe
 > [`INSTALL-DOCKER.md`](./INSTALL-DOCKER.md). Für Plesk siehe
-> [`DEPLOY-PLESK-GATEWAY.md`](./DEPLOY-PLESK-GATEWAY.md).
+> [`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md).
 
 ## Was im Bundle steckt
 
@@ -27,16 +27,21 @@ services/customer/      ← tds-customer-api (127.0.0.1:8004)
 Procfile, services.json, BUILD_INFO.json
 ```
 
-Auf dem Host läuft **kein** `composer install` — die Abhängigkeiten sind dabei.
+Beim `release`-Branch läuft auf dem Host **kein** `composer install` — die
+`vendor/`-Verzeichnisse sind im Bundle. (Hat der Host einen PHP-Composer, kann
+man alternativ `main` auschecken und `composer install --no-dev` pro
+`services/<name>/` + Gateway selbst ausführen.)
 
 ## 1. Bundle holen
 
 ```bash
-git clone -b build https://github.com/Tracht-Digital-Solutions/tds-api-gateway.git /srv/tds
+git clone -b release https://github.com/Tracht-Digital-Solutions/tds-api-gateway.git /srv/tds
 cd /srv/tds
 ```
 
-Spätere Updates: `git pull` (oder der Deploy-Webhook, s. u.).
+Spätere Updates: `git pull` (oder der Deploy-Webhook, s. u.). Den
+`release`-Branch gibt es erst nach dem ersten manuellen Release-Build
+(*Actions → Release → Run workflow*).
 
 > **Schnellweg — Web-Installer:** Statt der Schritte 2–4 von Hand kann der
 > Assistent unter **`https://api.tracht-digital.de/install.php`** alles

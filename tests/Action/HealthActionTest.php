@@ -52,4 +52,26 @@ final class HealthActionTest extends TestCase
         self::assertFalse($body['services']['/contact']['ok']);
         self::assertTrue($body['services']['/auth']['ok']);
     }
+
+    public function testTransportFailureCountsAsDownAndPingsEveryUpstream(): void
+    {
+        $client = new FakeProxyClient(new ProxyResponse(200, [], 'ok'));
+        // contact's health check fails at the transport layer (connect refused).
+        $client->throwWhenUrlContains(':8002');
+        $action = new HealthAction($this->registry(), $client);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/healthz');
+        $response = $action($request, new Response());
+
+        self::assertSame(503, $response->getStatusCode());
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertFalse($body['ok']);
+        self::assertFalse($body['services']['/contact']['ok']);
+        self::assertSame(0, $body['services']['/contact']['status']);
+        self::assertTrue($body['services']['/auth']['ok']);
+        self::assertCount(4, $body['services']);
+        // Every upstream is still pinged even though one fails.
+        self::assertSame(4, $client->calls);
+    }
 }

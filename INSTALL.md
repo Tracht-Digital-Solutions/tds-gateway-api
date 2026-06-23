@@ -1,12 +1,14 @@
 # INSTALL — tds-api-gateway
 
-> **Running the whole stack (gateway + the four APIs)?** Pick a guide:
-> - [`INSTALL-STACK.md`](./INSTALL-STACK.md) — bare-metal/Plesk-style: deploy the
+> **Deploying the whole stack (gateway + the four APIs)?** Pick a guide:
+> - [`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md) — **the** production release guide for a
+>   Plesk host: all five properties (four frontends + the API bundle), DNS/SSL,
+>   the single-project API deploy, the deploy webhooks. Plesk's built-in PHP
+>   Composer covered.
+> - [`INSTALL-STACK.md`](./INSTALL-STACK.md) — bare-metal/VPS: deploy the
 >   bundle, then `bin/start-stack.sh` brings the four services up.
 > - [`INSTALL-DOCKER.md`](./INSTALL-DOCKER.md) — one command (`docker compose up`)
 >   for MariaDB + gateway + all four services.
-> - [`DEPLOY-PLESK-GATEWAY.md`](./DEPLOY-PLESK-GATEWAY.md) — focused gateway-on-Plesk
->   release.
 
 ## 1. Local dev
 

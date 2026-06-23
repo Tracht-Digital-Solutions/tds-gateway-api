@@ -7,7 +7,6 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\ProxyClientInterface;
-use Tds\ApiGateway\Http\ProxyException;
 
 /**
  * Aggregated health: pings every upstream's /healthz with a short timeout.
@@ -24,19 +23,26 @@ final class HealthAction
 
     public function __invoke(Request $request, Response $response): Response
     {
+        $requests = [];
+        foreach ($this->registry->all() as $service) {
+            $requests['/' . $service->prefix] = [
+                'method' => 'GET',
+                'url' => $service->healthUrl(),
+                'headers' => [],
+                'body' => '',
+            ];
+        }
+
+        // Ping every upstream concurrently so /healthz can't serialise on a
+        // slow/dead one (a transport failure comes back as status 0).
+        $results = $this->client->sendMany($requests);
+
         $services = [];
         $allOk = true;
-
-        foreach ($this->registry->all() as $service) {
-            try {
-                $result = $this->client->send('GET', $service->healthUrl(), [], '');
-                $ok = $result->status >= 200 && $result->status < 300;
-                $status = $result->status;
-            } catch (ProxyException) {
-                $ok = false;
-                $status = 0;
-            }
-            $services['/' . $service->prefix] = ['ok' => $ok, 'status' => $status];
+        foreach (array_keys($requests) as $key) {
+            $status = isset($results[$key]) ? $results[$key]->status : 0;
+            $ok = $status >= 200 && $status < 300;
+            $services[$key] = ['ok' => $ok, 'status' => $status];
             $allOk = $allOk && $ok;
         }
 
