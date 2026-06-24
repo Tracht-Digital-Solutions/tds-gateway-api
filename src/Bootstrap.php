@@ -13,6 +13,7 @@ use Tds\ApiGateway\Action\ProxyAction;
 use Tds\ApiGateway\Action\WikiAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\CurlProxyClient;
+use Tds\ApiGateway\Support\Logger;
 
 final class Bootstrap
 {
@@ -27,6 +28,11 @@ final class Bootstrap
         $container = new Container();
 
         $container->set(ServiceRegistry::class, static fn () => ServiceRegistry::fromEnv($env));
+
+        // Structured file logger (default <root>/logs/gateway.log). Makes the
+        // cURL errno behind a 502 actually readable on the Plesk host, where
+        // PHP's default error_log sink is effectively invisible.
+        $container->set(Logger::class, static fn () => Logger::fromEnv($env, $rootDir));
 
         // Long-timeout client for proxied traffic (uploads, Stripe, etc.).
         $container->set('proxy.client', static fn () => new CurlProxyClient(
@@ -43,10 +49,12 @@ final class Bootstrap
         $container->set(ProxyAction::class, static fn (Container $c) => new ProxyAction(
             $c->get(ServiceRegistry::class),
             $c->get('proxy.client'),
+            $c->get(Logger::class),
         ));
         $container->set(HealthAction::class, static fn (Container $c) => new HealthAction(
             $c->get(ServiceRegistry::class),
             $c->get('health.client'),
+            $c->get(Logger::class),
         ));
         $container->set(IndexAction::class, static fn (Container $c) => new IndexAction(
             $c->get(ServiceRegistry::class),

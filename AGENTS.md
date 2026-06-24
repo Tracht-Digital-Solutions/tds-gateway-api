@@ -50,6 +50,28 @@ backends — read the root `CLAUDE.md` for the big picture.
   Fine for current upload sizes (blog covers, customer docs); revisit with
   streaming if large uploads land.
 
+## Logging (`Support\Logger`)
+
+- `Support\Logger` is a tiny dependency-free file logger — one JSON object per
+  line. It exists because the gateway runs under PHP-FPM on Plesk, where PHP's
+  default `error_log()` sink is effectively invisible, so a 502 ("upstream
+  unavailable") gave no clue **why**. Now `ProxyAction` logs the cURL
+  **errno + target URL** behind every failed hop (7=connection refused,
+  6=DNS, 28=timeout) at `error`, every successful proxy at `info`, and
+  `HealthAction` logs a `warning` listing the down upstreams.
+- Wired in `Bootstrap` via `Logger::fromEnv($env, $rootDir)` and injected as a
+  **nullable** ctor arg into `ProxyAction` / `HealthAction` (so the unit tests
+  construct them with no logger and stay log-free). Config:
+  `GATEWAY_LOG_FILE` (default `<root>/logs/gateway.log`, root-relative or
+  absolute, `off` disables) and `GATEWAY_LOG_LEVEL`
+  (`debug|info|warning|error|off`, default `info`; `.env.example` ships
+  `warning` so prod records only failures).
+- **Logging must never break the proxy.** A bad/unwritable path degrades to a
+  single `error_log()` fallback and is then silenced — `Logger` never throws.
+  `ProxyAction` still calls `error_log()` on a failure too, so the cause is
+  visible even when the file sink is misconfigured. `logs/` is gitignored;
+  don't commit log output.
+
 ## The build pipeline (`dev.yml` / `release.yml` → reusable `_assemble.yml`)
 
 The old single `build.yml`/`build`-branch is gone — there are now two thin

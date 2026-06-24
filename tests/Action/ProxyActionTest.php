@@ -9,6 +9,7 @@ use Slim\Psr7\Response;
 use Tds\ApiGateway\Action\ProxyAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\ProxyResponse;
+use Tds\ApiGateway\Support\Logger;
 use Tds\ApiGateway\Tests\Support\FakeProxyClient;
 
 final class ProxyActionTest extends TestCase
@@ -88,6 +89,28 @@ final class ProxyActionTest extends TestCase
         $response = $action($request, new Response());
 
         self::assertSame(502, $response->getStatusCode());
+    }
+
+    public function testLogsUpstreamFailureWithTargetAndCurlErrno(): void
+    {
+        $logPath = sys_get_temp_dir() . '/tds-gw-proxy-' . bin2hex(random_bytes(4)) . '.log';
+        $client = new FakeProxyClient();
+        $client->willThrow();
+        $action = new ProxyAction($this->registry(), $client, new Logger($logPath, 'info'));
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/content/blog');
+        $response = $action($request, new Response());
+
+        self::assertSame(502, $response->getStatusCode());
+        self::assertFileExists($logPath);
+        $entry = json_decode(trim((string) file_get_contents($logPath)), true);
+        self::assertSame('error', $entry['level']);
+        self::assertSame('/content', $entry['service']);
+        self::assertSame('http://127.0.0.1:8001/blog', $entry['target']);
+        self::assertArrayHasKey('curl_errno', $entry);
+
+        @unlink($logPath);
     }
 
     public function testForwardsOptionsPreflightToUpstream(): void

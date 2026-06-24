@@ -7,6 +7,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\ProxyClientInterface;
+use Tds\ApiGateway\Support\Logger;
 
 /**
  * Aggregated health: pings every upstream's /healthz with a short timeout.
@@ -18,6 +19,7 @@ final class HealthAction
     public function __construct(
         private readonly ServiceRegistry $registry,
         private readonly ProxyClientInterface $client,
+        private readonly ?Logger $logger = null,
     ) {
     }
 
@@ -39,11 +41,22 @@ final class HealthAction
 
         $services = [];
         $allOk = true;
+        $down = [];
         foreach (array_keys($requests) as $key) {
             $status = isset($results[$key]) ? $results[$key]->status : 0;
             $ok = $status >= 200 && $status < 300;
             $services[$key] = ['ok' => $ok, 'status' => $status];
             $allOk = $allOk && $ok;
+            if (!$ok) {
+                // status 0 = transport failure (connect refused / DNS / timeout).
+                $down[$key] = $status;
+            }
+        }
+
+        if ($down !== []) {
+            $this->logger?->warning('health check: upstream(s) down', [
+                'down' => $down,
+            ]);
         }
 
         $response->getBody()->write((string) json_encode([

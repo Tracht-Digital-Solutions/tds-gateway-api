@@ -9,6 +9,7 @@ use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\HeaderFilter;
 use Tds\ApiGateway\Http\ProxyClientInterface;
 use Tds\ApiGateway\Http\ProxyException;
+use Tds\ApiGateway\Support\Logger;
 
 /**
  * Catch-all: resolve the first path segment to an upstream and relay the
@@ -20,6 +21,7 @@ final class ProxyAction
     public function __construct(
         private readonly ServiceRegistry $registry,
         private readonly ProxyClientInterface $client,
+        private readonly ?Logger $logger = null,
     ) {
     }
 
@@ -48,6 +50,7 @@ final class ProxyAction
         $headers['X-Forwarded-Prefix'] = ['/' . $service->prefix];
         $headers['X-Forwarded-For'] = [$this->forwardedFor($request)];
 
+        $startedAt = microtime(true);
         try {
             $upstream = $this->client->send(
                 $request->getMethod(),
@@ -56,12 +59,33 @@ final class ProxyAction
                 (string) $request->getBody(),
             );
         } catch (ProxyException $e) {
+            // The exception code carries the cURL errno (7 = connection
+            // refused, 6 = couldn't resolve host, 28 = timeout, …) — the single
+            // most useful datum for diagnosing an "all services down" outage.
+            $this->logger?->error('upstream request failed', [
+                'service' => '/' . $service->prefix,
+                'method' => $request->getMethod(),
+                'target' => $url,
+                'curl_errno' => $e->getCode(),
+                'detail' => $e->getMessage(),
+                'duration_ms' => self::elapsedMs($startedAt),
+            ]);
+            // error_log() too, so the failure is visible even if the file sink
+            // is misconfigured.
             error_log('[gateway] ' . $e->getMessage());
             return $this->json($response->withStatus(502), [
                 'error' => 'The upstream service is unavailable.',
                 'service' => '/' . $service->prefix,
             ]);
         }
+
+        $this->logger?->info('proxied', [
+            'service' => '/' . $service->prefix,
+            'method' => $request->getMethod(),
+            'target' => $url,
+            'status' => $upstream->status,
+            'duration_ms' => self::elapsedMs($startedAt),
+        ]);
 
         $result = $response->withStatus($upstream->status);
         foreach (HeaderFilter::forResponse($upstream->headers) as $name => $values) {
@@ -73,6 +97,11 @@ final class ProxyAction
         }
         $result->getBody()->write($upstream->body);
         return $result;
+    }
+
+    private static function elapsedMs(float $startedAt): float
+    {
+        return round((microtime(true) - $startedAt) * 1000, 1);
     }
 
     private function forwardedFor(Request $request): string
