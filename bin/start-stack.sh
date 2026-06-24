@@ -74,8 +74,11 @@ start_service() {
   fi
 
   log "Starting $name on 127.0.0.1:$port…"
-  nohup "$PHP_BIN" -S "127.0.0.1:$port" -t "$docroot" \
-    >>"$TDS_LOG_DIR/tds-$name.log" 2>&1 &
+  # No `nohup` dependency (a restricted Plesk shell may lack it): a subshell
+  # that ignores SIGHUP and detaches stdin is the portable POSIX equivalent —
+  # the exec'd php keeps the ignore-HUP disposition and outlives the parent.
+  ( trap '' HUP; exec "$PHP_BIN" -S "127.0.0.1:$port" -t "$docroot" \
+    >>"$TDS_LOG_DIR/tds-$name.log" 2>&1 </dev/null ) &
 }
 
 for svc in $SERVICES; do
@@ -87,8 +90,9 @@ if [ "$START_GATEWAY" = "1" ]; then
     log "gateway already listening on 127.0.0.1:8000 — leaving it."
   else
     log "Starting gateway on 0.0.0.0:8000…"
-    nohup "$PHP_BIN" -S "0.0.0.0:8000" -t "$GATEWAY_DIR/public" \
-      >>"$TDS_LOG_DIR/tds-gateway.log" 2>&1 &
+    # See the note above: portable nohup-free detach for restricted shells.
+    ( trap '' HUP; exec "$PHP_BIN" -S "0.0.0.0:8000" -t "$GATEWAY_DIR/public" \
+      >>"$TDS_LOG_DIR/tds-gateway.log" 2>&1 </dev/null ) &
   fi
 fi
 

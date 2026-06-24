@@ -135,8 +135,9 @@ LOGS=/var/www/vhosts/tracht-digital.de/logs
 for svc in auth:8003 contact:8002 content:8001 customer:8004; do
   name=${svc%%:*}; port=${svc##*:}
   pgrep -f "php -S 127.0.0.1:$port" >/dev/null && continue
-  nohup "$PHP" -S "127.0.0.1:$port" -t "$BUNDLE/services/$name/public" \
-    >> "$LOGS/tds-$name.log" 2>&1 &
+  # nohup-free detach (a restricted Plesk shell may not ship `nohup`):
+  ( trap '' HUP; exec "$PHP" -S "127.0.0.1:$port" -t "$BUNDLE/services/$name/public" \
+    >> "$LOGS/tds-$name.log" 2>&1 </dev/null ) &
 done
 ```
 
