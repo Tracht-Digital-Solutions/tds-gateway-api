@@ -55,9 +55,10 @@ Für jede der vier Frontend-(Sub)Domains identisch:
 3. **Deploy-Webhook verdrahten**: Die Git-Extension zeigt eine
    *Webhook-URL* („Repository aktualisieren") an. Diese URL als Secret
    `DEPLOY_WEBHOOK_URL` im **jeweiligen Frontend-Repo** auf GitHub hinterlegen.
-   Die CI pingt sie per GET nach jedem **Release** (nicht auf `dev`) — Plesk pullt
-   dann und die Seite ist live. (Der Token steckt in der URL selbst; nirgendwo
-   sonst ablegen.)
+   Die CI pingt sie **per POST** nach jedem **Release** (nicht auf `dev`) — Plesks
+   Git-Webhook beantwortet **nur POST**, ein bloßes GET liefert **404**. Plesk
+   pullt dann und die Seite ist live. (Der Token steckt in der URL selbst;
+   nirgendwo sonst ablegen.)
 4. `admin.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
    zusätzlich abdichten will, legt in Plesk eine IP-Beschränkung oder BasicAuth
    davor (optional).
@@ -252,6 +253,9 @@ Bundle gebaut wurde.
   zwischen Prozess und `*_UPSTREAM`.
 - **Frontend-CI grün, aber Site nicht aktualisiert** → Webhook-Secret fehlt/falsch;
   die CI wertet das nur als gelbe Warnung, nie als roten Build
-  (Annotations des Runs prüfen).
+  (Annotations des Runs prüfen). Zeigt die Warnung **HTTP 404**, obwohl Host/Port
+  (`:8443`) stimmen, ist meist der Token/Pfad veraltet — die aktuelle Webhook-URL
+  aus Plesk neu kopieren. (Die CI ruft den Hook korrekt **per POST** auf; ein GET
+  liefert bei Plesk grundsätzlich 404.)
 - **Login funktioniert auf `admin.`, aber nicht auf `app.`** → Cookie-Domain:
   beide Subdomains müssen über HTTPS unter `.tracht-digital.de` laufen.
