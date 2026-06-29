@@ -1,6 +1,7 @@
 name: CI
 
 # PR-only gate (the push/dispatch builds run via dev.yml → _assemble.yml).
+# The lint/test body lives in _check.yml, shared with _assemble.yml.
 on:
   pull_request:
     branches: [main]
@@ -11,25 +12,5 @@ concurrency:
 
 jobs:
   check:
-    name: Lint & test gateway
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v5
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: curl, mbstring
-          coverage: none
-          tools: composer:v2
-      - name: Composer validate
-        run: composer validate --no-check-publish
-      - name: Composer install (cached)
-        uses: ramsey/composer-install@v3
-      - name: PHP syntax check
-        run: find src tests -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
-      - name: PHPUnit
-        run: composer test
+    uses: ./.github/workflows/_check.yml
+    secrets: inherit
