@@ -541,8 +541,9 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     <?php endif; ?>
 
     <div class="note ok">
-      Prüfen Sie die Plattform über <code>/healthz</code> (sobald die Service-Prozesse laufen — siehe
-      <code>bin/start-stack.sh</code>) und das interne Wiki unter <code>/wiki</code>.
+      Fertig — es müssen <strong>keine Dienst-Prozesse gestartet</strong> werden: Das Gateway bedient die
+      vier APIs im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die Plattform
+      direkt über <code>/healthz</code> und das interne Wiki unter <code>/wiki</code>.
     </div>
     <div class="note err">
       <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.

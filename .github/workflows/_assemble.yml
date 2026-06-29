@@ -136,6 +136,10 @@ jobs:
 
           # Each micro-backend under services/<name> (keep vendor/, keep
           # auth's committed keys/public.pem; private keys are never in git).
+          # NB: the per-service vendor/ is what the gateway's default in-process
+          # mode (GATEWAY_MODE=inprocess) requires — it requires
+          # services/<name>/vendor/autoload.php at runtime. The Procfile/
+          # services.json below describe the optional proxy-mode loopback ports.
           for name in auth contact content customer; do
             rsync -a \
               --exclude '.git' --exclude '.github' --exclude '.gitignore' \
@@ -188,10 +192,12 @@ jobs:
           API push. It contains the PHP gateway plus all four micro-backends
           with their `vendor/` directories, ready to run.
 
-          Run with the `Procfile` (e.g. via a Procfile runner or the
-          `deploy/supervisor.conf.example` in the gateway repo). Each service
-          still needs its own `.env` on the host. See `BUILD_INFO.json` for
-          the source commit of each piece.
+          Default run mode: point a PHP-FPM docroot at `gateway/public` — the
+          gateway serves all four services in-process (`GATEWAY_MODE=inprocess`),
+          nothing else to start. The `Procfile` / `deploy/supervisor.conf.example`
+          are for the optional `GATEWAY_MODE=proxy` (loopback `php -S`). Each
+          service still needs its own `.env` on the host. See `BUILD_INFO.json`
+          for the source commit of each piece.
           EOF
 
       # Generate the API wiki from the just-checked-out route definitions so

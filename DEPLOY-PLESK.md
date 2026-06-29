@@ -103,51 +103,31 @@ Procfile, services.json, BUILD_INFO.json
 
 Damit läuft das Gateway als gewöhnliche PHP-FPM-App — das mitgelieferte
 `gateway/public/.htaccess` macht das Front-Controller-Rewrite unter Apache.
-Der `gateway:`-Eintrag im `Procfile` (eigener Prozess auf `:8000`) wird in
-diesem Modell **nicht** benötigt.
+Im Standardmodus (`GATEWAY_MODE=inprocess`) bedient dieser **eine** FPM-Prozess
+die gesamte API-Fläche; der `gateway:`-Eintrag im `Procfile` (eigener Prozess
+auf `:8000`) wird **nicht** benötigt.
 
-### 4.2 Die vier Service-Prozesse
+### 4.2 Keine Service-Prozesse nötig (Standard: In-Process)
 
-Die Services laufen als lokale PHP-Server, erreichbar nur via `127.0.0.1`
-(die Ports müssen zu den `*_UPSTREAM`-Defaults des Gateways passen):
+Im Standardmodus `GATEWAY_MODE=inprocess` lädt das Gateway die App jedes Service
+direkt aus `services/<name>/` (jeweils eigenes `vendor/`) und führt sie **im
+selben PHP-FPM-Request** aus. Es laufen **keine** `php -S`-Prozesse, kein
+Supervisor, kein Watchdog — PHP-FPM bedient alle vier APIs on demand. Genau das
+macht „auf Plesk ohne SSH installieren und starten" möglich: Nach 4.1 (Docroot
+auf `gateway/public`) ist die Plattform startklar, sobald 4.3/4.4 (`.env` +
+Migrationen — am einfachsten über `/install.php`) erledigt sind. **Es gibt
+nichts zu starten.**
 
-```
-auth     → 127.0.0.1:8003
-contact  → 127.0.0.1:8002
-content  → 127.0.0.1:8001
-customer → 127.0.0.1:8004
-```
+Die Service-Verzeichnisse müssen neben dem Gateway liegen
+(`<zielpfad>/services/<name>`, genau so wie das Bundle es ausliefert).
+Abweichende Layouts über `GATEWAY_SERVICES_DIR` in der Gateway-`.env`.
 
-**Mit Root-Zugang (empfohlen):** `deploy/supervisor.conf.example` übernehmen,
-die fünf `program:`-Pfade auf den Plesk-Zielpfad anpassen (den
-`tds-gateway`-Block weglassen, s. o.) und `supervisorctl reread && update`.
-
-**Ohne Root:** Wrapper-Skript außerhalb des Git-Zielpfads ablegen
-(z. B. `/var/www/vhosts/tracht-digital.de/bin/start-tds-services.sh`):
-
-```sh
-#!/bin/sh
-# Startet fehlende TDS-Service-Prozesse; idempotent (Watchdog-tauglich).
-PHP=/opt/plesk/php/8.3/bin/php
-BUNDLE=/var/www/vhosts/tracht-digital.de/api.tracht-digital.de
-LOGS=/var/www/vhosts/tracht-digital.de/logs
-
-for svc in auth:8003 contact:8002 content:8001 customer:8004; do
-  name=${svc%%:*}; port=${svc##*:}
-  pgrep -f "php -S 127.0.0.1:$port" >/dev/null && continue
-  # nohup-free detach (a restricted Plesk shell may not ship `nohup`):
-  ( trap '' HUP; exec "$PHP" -S "127.0.0.1:$port" -t "$BUNDLE/services/$name/public" \
-    >> "$LOGS/tds-$name.log" 2>&1 </dev/null ) &
-done
-```
-
-Das Bundle bringt dieses Skript bereits mit: **`gateway/bin/start-stack.sh`**
-(idempotent, Watchdog-tauglich) — statt das obige selbst zu schreiben, einfach
-`PHP_BIN=/opt/plesk/php/8.3/bin/php <zielpfad>/gateway/bin/start-stack.sh`
-aufrufen.
-
-In Plesk unter *Geplante Aufgaben* zweimal eintragen: einmal `@reboot`, einmal
-alle 5 Minuten (Watchdog — startet abgestürzte Prozesse neu).
+> **Proxy-Modus (optional — nur für Nicht-Plesk-Hosts / ohne FPM).** Wer die
+> Services lieber als eigene Loopback-Prozesse fährt, setzt `GATEWAY_MODE=proxy`
+> in der Gateway-`.env` und startet sie mit `deploy/supervisor.conf.example`
+> (mit Root) **oder** `gateway/bin/start-stack.sh` + *Geplante Aufgaben*
+> (`@reboot` + 5-Minuten-Watchdog). Ports: auth 8003, contact 8002,
+> content 8001, customer 8004. Auf Plesk im Normalfall **nicht** nötig.
 
 ### 4.3 `.env` + Schlüssel je Service
 
@@ -170,9 +150,10 @@ zusätzlich in den Passwort-Manager.
 - **contact**: DB-Zugang (Rate-Limit-DB), Resend-API-Key.
 - **content**: DB-Zugang, `ADMIN_TOKEN`.
 - **customer**: DB-Zugang, Stripe-Keys, `ADMIN_TOKEN`, JWKS-URL.
-- **gateway**: braucht standardmäßig **keine** `.env` — die Upstream-Defaults
-  (`127.0.0.1:800x`) passen zu 4.2. Nur für das interne `/wiki` zusätzlich
-  `ADMIN_TOKEN` setzen (gleicher Admin-Token; ohne ihn ist `/wiki` 404).
+- **gateway**: braucht standardmäßig **keine** `.env` — `GATEWAY_MODE=inprocess`
+  ist der Default und findet die Services unter `services/<name>`. Nur für das
+  interne `/wiki` zusätzlich `ADMIN_TOKEN` setzen (gleicher Admin-Token; ohne ihn
+  ist `/wiki` 404). (`/install.php` schreibt diese Gateway-`.env` mit.)
 
 Details je Service: das `INSTALL.md` im jeweiligen API-Repo.
 
@@ -203,10 +184,13 @@ hinterlegen (läuft nach jedem Pull):
 for name in auth contact content customer; do
   (cd "services/$name" && /opt/plesk/php/8.3/bin/php vendor/bin/phinx migrate -e production)
 done
-# Service-Prozesse neu starten, damit der frische Code greift:
-pkill -f 'php -S 127.0.0.1:800' || true
-/var/www/vhosts/tracht-digital.de/bin/start-tds-services.sh
 ```
+
+Im In-Process-Modus sind **keine Prozess-Neustarts** nötig — das Gateway baut die
+Service-App bei jedem Request frisch, neuer Code greift sofort. Hält OPcache nach
+einem Pull alte Dateien, in Plesk einmal *PHP-FPM neu laden* (oder
+`opcache.validate_timestamps` an lassen). Bequemer als die Schleife oben:
+`PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/migrate-stack.sh`.
 
 Die *Webhook-URL* dieser Git-Instanz als Secret `DEPLOY_WEBHOOK_URL` im
 **tds-api-gateway-Repo** hinterlegen — und **nur dort**. Die vier API-Repos
@@ -235,8 +219,9 @@ Bundle gebaut wurde.
 3. ☐ **In allen 5 Repos einmal den `release`-Workflow** (*Actions → Release → Run
    workflow*) ausführen, damit der `release`-Branch existiert.
 4. ☐ `api.`: Git-Checkout (`release`), Docroot auf `gateway/public`, DBs + DB-User,
-   `.env`-Dateien + `private.pem`, Migrationen, Service-Prozesse starten,
-   Deploy-Aktionen + Webhook-Secret setzen, `/healthz` grün.
+   `.env`-Dateien + `private.pem`, Migrationen (am einfachsten alles via
+   `/install.php`), Deploy-Aktionen + Webhook-Secret setzen, `/healthz` grün.
+   **Keine Service-Prozesse zu starten** (In-Process-Modus).
 5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
    Webhook-Secrets in den vier Frontend-Repos setzen.
 6. ☐ **`tds-blog` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
@@ -249,9 +234,11 @@ Bundle gebaut wurde.
 
 - **`api.` antwortet 404 auf alles** → Docroot zeigt nicht auf `gateway/public`,
   oder das `.htaccess`-Rewrite greift nicht (mod_rewrite/AllowOverride prüfen).
-- **`/healthz` meldet einzelne Services down** → der jeweilige
-  `php -S`-Prozess läuft nicht (Watchdog-Task prüfen) oder Port-Mismatch
-  zwischen Prozess und `*_UPSTREAM`.
+- **`/healthz` meldet einzelne Services down** → im In-Process-Modus meist eine
+  fehlende/falsche `services/<name>/.env` oder eine nicht erreichbare DB; bei
+  „status 0" fehlt das Service-Verzeichnis bzw. dessen `vendor/` (Bundle prüfen,
+  `GATEWAY_SERVICES_DIR`). Im Proxy-Modus: der jeweilige `php -S`-Prozess läuft
+  nicht (Watchdog-Task) oder Port-Mismatch zum `*_UPSTREAM`.
 - **Frontend-CI grün, aber Site nicht aktualisiert** → Webhook-Secret fehlt/falsch;
   die CI wertet das nur als gelbe Warnung, nie als roten Build
   (Annotations des Runs prüfen). Zeigt die Warnung **HTTP 404**, obwohl Host/Port

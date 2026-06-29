@@ -87,6 +87,13 @@ bin/migrate-stack.sh          # ruft phinx migrate -e production für alle vier 
 
 ## 4. Services starten
 
+> **Einfacher Weg auf einem PHP-FPM-Host:** Im Standardmodus
+> `GATEWAY_MODE=inprocess` bedient das Gateway alle vier APIs im eigenen
+> FPM-Prozess — dann ist dieser Abschnitt **überflüssig** (nichts zu starten),
+> es genügt Abschnitt 5 (Docroot auf `gateway/public`). Die folgenden
+> Service-Prozesse braucht nur der **Proxy-Modus** (`GATEWAY_MODE=proxy`), z. B.
+> hinter nginx ohne FPM.
+
 `bin/start-stack.sh` startet die vier Service-Prozesse **idempotent** (ein
 schon laufender Service wird nicht doppelt gestartet):
 

@@ -39,7 +39,7 @@ inside one repo at a time.
 
 | Repo | Domain | Role |
 |---|---|---|
-| `tds-api-gateway` | `api.tracht-digital.de` | Single public entry; routes by path prefix to the four backends above (`/auth`→8003, `/contact`→8002, `/content`→8001, `/customer`→8004) |
+| `tds-api-gateway` | `api.tracht-digital.de` | Single public entry; routes by path prefix to the four backends above. Default `inprocess` (runs them inside one PHP-FPM app); `proxy` mode targets `/auth`→8003, `/contact`→8002, `/content`→8001, `/customer`→8004 |
 
 **Shared library:**
 
@@ -51,11 +51,16 @@ inside one repo at a time.
 
 ## Big-picture architecture
 
-- **`tds-api-gateway` is the single front door.** It's a transparent Slim proxy: the
-  first path segment selects the backend and the remainder is forwarded
-  (`/auth/admin/login` → `:8003/admin/login`). auth/content/customer mount at root so the
-  prefix is stripped; **contact-api keeps its own `/contact` route** (the frontend POSTs to
-  `.../contact` with no sub-path), so the gateway rewrites `/contact`→`:8002/contact`. CORS
+- **`tds-api-gateway` is the single front door.** The first path segment selects the
+  backend and the remainder is forwarded (`/auth/admin/login` → auth's `/admin/login`).
+  auth/content/customer mount at root so the prefix is stripped; **contact-api keeps its own
+  `/contact` route** (the frontend POSTs to `.../contact` with no sub-path), so the gateway
+  rewrites `/contact`→contact's `/contact`. **By default (`GATEWAY_MODE=inprocess`) the
+  gateway runs each backend *in-process* — it loads `services/<name>`'s Slim app and calls
+  `Bootstrap::createApp(...)->handle()`, so the whole API surface is one PHP-FPM app with no
+  service processes to start (the Plesk "install + start without SSH" model). The loopback
+  `php -S` ports 8001–8004 + the cURL reverse-proxy only apply in the optional
+  `GATEWAY_MODE=proxy` (supervisor/nginx/Docker run modes).** CORS
   stays owned by each upstream — don't add it at the gateway (it'd duplicate the header). CI
   assembles the gateway + all four services into a self-contained bundle on the orphan
   **`dev`** branch (auto, on a gateway push **or** a `repository_dispatch(api-pushed)` from

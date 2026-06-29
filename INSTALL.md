@@ -12,9 +12,15 @@
 
 ## 1. Local dev
 
+The gateway has two modes (`GATEWAY_MODE`): **`inprocess`** (default) runs each
+service's Slim app *inside* the gateway process — that's how the assembled bundle
+serves the whole surface as one PHP-FPM app in production, with nothing to start.
+**`proxy`** relays over HTTP to separately-running services. Locally the four APIs
+live in sibling repos (not a `services/` bundle), so use **proxy** mode:
+
 ```bash
 composer install
-cp .env.example .env          # defaults target localhost:800x
+cp .env.example .env          # then set: GATEWAY_MODE=proxy
 composer start                # http://localhost:8000
 ```
 
@@ -61,28 +67,36 @@ the **`release`** branch and pings `DEPLOY_WEBHOOK_URL`. The host checks out
 > SSL, the single-project API deploy, webhooks) is in
 > [`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md).
 
-Three ways to run the surface — pick one:
+Ways to run the surface — pick one:
 
-1. **Gateway under PHP-FPM** (Plesk-style). Point the webserver docroot at
-   `gateway/public` (the bundled `.htaccess` does the front-controller
-   rewrite on Apache) and run only the four service processes. No gateway
-   process needed.
-2. **PHP gateway as a process.** Run all five processes from the bundle's
-   `Procfile` (see `deploy/supervisor.conf.example`) and point the host's
-   webserver at the gateway on `:8000`. The gateway proxies to the services.
-3. **nginx only** (no PHP hop). Run just the four services and use
-   `deploy/nginx.conf.example` to prefix-route straight to their ports.
+1. **In-process under PHP-FPM** (`GATEWAY_MODE=inprocess`, the default —
+   **recommended, the Plesk model**). Point the webserver docroot at
+   `gateway/public` (the bundled `.htaccess` does the Apache front-controller
+   rewrite). The gateway loads each service's app inside its own PHP-FPM
+   request — **there are no service processes to start or keep alive.** The four
+   apps are read from `<bundle>/services/<name>` (override with
+   `GATEWAY_SERVICES_DIR`). This is what makes "install + start on Plesk without
+   SSH" possible: FPM serves everything on request.
+2. **Proxy — gateway as a process** (`GATEWAY_MODE=proxy`). Run all five
+   processes from the bundle's `Procfile` (see `deploy/supervisor.conf.example`,
+   needs a long-lived shell / `@reboot` + watchdog) and point the host's
+   webserver at the gateway on `:8000`. The gateway proxies over HTTP to the
+   four services on their loopback ports.
+3. **Proxy — nginx only** (no PHP gateway process). Run just the four services
+   and use `deploy/nginx.conf.example` to prefix-route straight to their ports.
 
 Migrations run **from the bundle**: the assemble workflow re-adds phinx
 after the `--no-dev` install, so
 `php vendor/bin/phinx migrate -e production` works inside each
-`services/<name>/` without a composer install on the host.
+`services/<name>/` without a composer install on the host (the web installer at
+`/install.php` and `bin/migrate-stack.sh` both do this for you).
 
-Either way, each service still needs its own `.env` on the host (DB creds,
-JWT keys, Resend/Stripe secrets — see each service's INSTALL.md). The gateway
-itself needs only the `*_UPSTREAM` values if the ports differ from the
-defaults, plus `ADMIN_TOKEN` if you want the internal `/wiki` (set it to the
-same shared admin token; unset leaves the wiki disabled/404).
+Each service still needs its own `.env` on the host (DB creds, JWT keys,
+Resend/Stripe secrets — see each service's INSTALL.md; the `/install.php` wizard
+writes them all). The gateway itself needs only `ADMIN_TOKEN` if you want the
+internal `/wiki` (set it to the same shared admin token; unset leaves the wiki
+disabled/404), plus — in **proxy** mode only — the `*_UPSTREAM` values if the
+ports differ from the defaults.
 
 ## 4. Verifying the pipeline
 

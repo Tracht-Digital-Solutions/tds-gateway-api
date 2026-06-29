@@ -1,25 +1,62 @@
 # Agent notes — tds-api-gateway
 
-PHP 8.3 + Slim 4 transparent reverse proxy. Single entry for
-`api.tracht-digital.de`; routes by first path segment to the four
-micro-backends. Same env-helper / CI / deploy-webhook conventions as the
-backends — read the root `CLAUDE.md` for the big picture.
+PHP 8.3 + Slim 4 single entry for `api.tracht-digital.de`; routes by first path
+segment to the four micro-backends. **By default it runs each backend
+*in-process* (`GATEWAY_MODE=inprocess`)** — the whole API surface is one
+PHP-FPM app, with no service processes to start (the Plesk "install + start
+without SSH" model). An optional **`GATEWAY_MODE=proxy`** relays over HTTP to
+the loopback `php -S` services instead (supervisor/nginx/Docker run modes). Same
+env-helper / CI / deploy-webhook conventions as the backends — read the root
+`CLAUDE.md` for the big picture.
 
 ## Mental model
 
+- **Two modes, chosen in `Bootstrap` from `GATEWAY_MODE` (default `inprocess`).**
+  Both share the routing table and the `/`, `/healthz`, `/wiki` routes; only the
+  catch-all + health action differ.
 - `Config\ServiceRegistry` is the routing table (prefix → `Service`), built
   from env with baked defaults for the four known services. `match($path)`
   returns `[Service, $remainder]`.
-- `Service::targetFor($remainder, $query)` builds the upstream URL as
-  `upstream + rewrite + remainder`. `rewrite` is empty for root-mounted
-  services and `/contact` for contact-api.
-- `Action\ProxyAction` is a catch-all (`/{path:.*}`). It relays the request
-  via `Http\ProxyClientInterface` (cURL impl) and mirrors the response.
+- `Service::targetFor($remainder, $query)` builds the upstream URL
+  (`upstream + rewrite + remainder`) for **proxy** mode; `Service::pathFor($remainder)`
+  is its host-less twin (`rewrite + remainder`, `''`→`/`) for the **in-process**
+  sub-request path. `rewrite` is empty for root-mounted services and `/contact`
+  for contact-api.
+
+### In-process mode (default)
+
+- `Dispatch\InProcessDispatcher` loads a service's `vendor/autoload.php` on
+  demand and calls `Tds\<Name>Api\Bootstrap::createApp($dir)->handle($subReq)`.
+  The prefix→`[dir, BootstrapFQCN]` map is built in `Bootstrap` from the registry
+  + `SERVICE_BOOTSTRAPS`; services live at `GATEWAY_SERVICES_DIR`
+  (default `<bundle>/services`).
+- **Env isolation is the crux.** Services do `Dotenv::createImmutable()->load()`
+  and read `$_ENV`; a reused FPM worker keeps those globals, and an *immutable*
+  loader won't overwrite an existing key — so a later `/customer` request would
+  see the earlier `/auth` request's `DB_NAME`. The dispatcher wraps each dispatch
+  in a surgical env scope: it enumerates the service's `.env` keys with
+  `Dotenv::parse` (side-effect free), clears exactly those from
+  `$_ENV`/`$_SERVER`/`getenv`, then restores their prior state in a `finally`.
+  This is why the four services stay **byte-for-byte unchanged** (still run
+  standalone via `composer start`).
+- `Action\DispatchAction` is the catch-all (`/{path:.*}`): `match` → 404 if
+  unknown, add `X-Forwarded-*`, dispatch in-process, wrap any failure as a 502.
+  `Action\InProcessHealthAction` runs each service's `/healthz` in-process and
+  aggregates (a boot/dispatch failure = status 0), same JSON shape as the proxy
+  `HealthAction`.
+- The dispatcher takes an **injectable app-resolver** (`callable(dir, fqcn): App`)
+  so the unit tests supply a fake app + fake `.env` without any sibling repo
+  checked out.
+
+### Proxy mode (`GATEWAY_MODE=proxy`)
+
+- `Action\ProxyAction` is the catch-all; it relays the request via
+  `Http\ProxyClientInterface` (cURL impl) and mirrors the response.
 - `Action\HealthAction` fans out to every upstream `/healthz` **concurrently**
   via `ProxyClientInterface::sendMany()` (curl_multi), so one slow/dead upstream
   can't serialise the check; a transport failure comes back as a status-0
-  response (reported as down). `Action\IndexAction` lists prefixes for
-  navigation.
+  response (reported as down). `Action\IndexAction` (used in both modes) lists
+  prefixes for navigation.
 - `Http\ProxyClientInterface` has two methods: `send()` (single, used by
   `ProxyAction`, throws `ProxyException` on transport failure) and `sendMany()`
   (concurrent batch, used by `HealthAction`, never throws — failures are
@@ -46,9 +83,18 @@ backends — read the root `CLAUDE.md` for the big picture.
 - **Env helper:** never `$_ENV[$key] ?? getenv($key) ?: $default` — `??`
   binds tighter than `?:` and clobbers falsy values. Use explicit `?? false`
   (same bug that bit all four APIs).
-- **Bodies are buffered in memory** (cURL `POSTFIELDS` with the raw string).
-  Fine for current upload sizes (blog covers, customer docs); revisit with
-  streaming if large uploads land.
+- **Bodies are buffered in memory** in *proxy* mode (cURL `POSTFIELDS` with the
+  raw string). Fine for current upload sizes (blog covers, customer docs);
+  revisit with streaming if large uploads land. In-process mode passes the PSR-7
+  request straight through (uploads via `getUploadedFiles()`), so no extra copy.
+- **In-process autoloader: keep the per-service `vendor/` versions in lockstep.**
+  Each request loads one service's autoloader; shared libs (Slim/php-di/phpdotenv)
+  load once and "first loaded wins" for the worker. Because the bundle is
+  assembled from all repos at once with identical constraints the copies match —
+  don't introduce a service that pins a divergent Slim/php-di/phpdotenv major.
+- **Don't make the four services depend on the gateway, or read env outside their
+  `Bootstrap`.** The in-process env scope only brackets `createApp`; an action
+  reading `getenv()` at request time would escape it.
 
 ## Logging (`Support\Logger`)
 
@@ -184,7 +230,10 @@ needed). That asymmetric failure is the tell for an unset/expired token.
 
 ## Tests
 
-PHPUnit 10, no DB, no network — `Http\ProxyClientInterface` is faked
-(`tests/Support/FakeProxyClient`). `composer test` runs the suite
+PHPUnit 10, no DB, no network. Proxy mode fakes `Http\ProxyClientInterface`
+(`tests/Support/FakeProxyClient`); in-process mode injects a fake app-resolver +
+temp `.env` into `InProcessDispatcher` (`tests/Dispatch/InProcessDispatcherTest`
+covers env isolation, path rewrite, 404, 502; `DispatchActionTest` /
+`InProcessHealthActionTest` cover the actions). `composer test` runs the suite
 (`WikiActionTest` covers the wiki auth gate). The installer is a standalone
 script (no unit tests); validate it with `php -l` + a built-in-server smoke.

@@ -39,6 +39,21 @@ final class Service
         return $url;
     }
 
+    /**
+     * Host-less twin of {@see targetFor()}: the path the service's own router
+     * should see in the in-process dispatch mode (no upstream host, no query —
+     * the query rides along on the forwarded request's URI).
+     *
+     * `auth` + `/admin/login` -> `/admin/login`
+     * `contact` (rewrite `/contact`) + `''` -> `/contact`
+     * `content` + `''` -> `/`  (a bare prefix hit maps to the service root)
+     */
+    public function pathFor(string $remainder): string
+    {
+        $path = $this->rewrite . $remainder;
+        return $path === '' ? '/' : $path;
+    }
+
     /** Each micro-backend exposes `/healthz` at its root. */
     public function healthUrl(): string
     {
