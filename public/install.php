@@ -146,8 +146,14 @@ function generate_keypair(string $authDir): array
     return [true, 'RS256-Schlüsselpaar erzeugt (keys/private.pem + public.pem).'];
 }
 
-/** Run `php vendor/bin/phinx migrate -e production` in a service dir. */
-function run_migration(string $serviceDir): array
+/**
+ * Run `php vendor/bin/phinx migrate -e production` in a service dir.
+ *
+ * Reads the child's pipes non-blocking against a wall-clock deadline so a stalled
+ * migration (e.g. a DB connect that never answers) can't hang the request forever —
+ * the old blocking `stream_get_contents()` was the prime suspect for "installer hangs".
+ */
+function run_migration(string $serviceDir, int $timeout = 120): array
 {
     $phinx = $serviceDir . '/vendor/bin/phinx';
     if (!is_file($phinx)) {
@@ -162,11 +168,103 @@ function run_migration(string $serviceDir): array
     if (!is_resource($proc)) {
         return [false, 'Konnte den Migrationsprozess nicht starten.'];
     }
-    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    $out = '';
+    $deadline = microtime(true) + $timeout;
+    while (true) {
+        $status = proc_get_status($proc);
+        $out .= (string) stream_get_contents($pipes[1]);
+        $out .= (string) stream_get_contents($pipes[2]);
+        if (!$status['running']) {
+            break;
+        }
+        if (microtime(true) >= $deadline) {
+            proc_terminate($proc);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($proc);
+            return [false, "Zeitüberschreitung nach {$timeout}s — Migration abgebrochen "
+                . "(DB erreichbar? Zugangsdaten korrekt?).\n" . trim($out)];
+        }
+        usleep(100_000);
+    }
+    // Drain anything buffered after the process exited.
+    $out .= (string) stream_get_contents($pipes[1]);
+    $out .= (string) stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
     $code = proc_close($proc);
-    return [$code === 0, trim((string) $out)];
+    return [$code === 0, trim($out)];
+}
+
+/** Ordered list of install steps the apply phase runs, as [id, label] pairs. */
+function install_tasks(): array
+{
+    return [
+        ['env_gateway',  'gateway/.env'],
+        ['env_auth',     'services/auth/.env'],
+        ['env_contact',  'services/contact/.env'],
+        ['env_content',  'services/content/.env'],
+        ['env_customer', 'services/customer/.env'],
+        ['keys',         'Auth RS256-Schlüsselpaar'],
+        ['dir_documents','Dokument-Verzeichnis'],
+        ['dir_blog',     'Blog-Upload-Verzeichnis'],
+        ['migrate_auth',    'Migration: auth'],
+        ['migrate_contact', 'Migration: contact'],
+        ['migrate_content', 'Migration: content'],
+        ['migrate_customer','Migration: customer'],
+        ['finalize',     'Abschluss'],
+    ];
+}
+
+/**
+ * Execute one install task by id. Returns [ok, human-readable detail].
+ * Each task is small and idempotent so the wizard can drive them one-by-one
+ * over AJAX with a live progress bar (no single multi-minute blocking request).
+ */
+function run_task(string $id, array $c, string $gatewayDir, string $servicesDir, string $lockFile): array
+{
+    switch ($id) {
+        case 'env_gateway':
+            $ok = @file_put_contents($gatewayDir . '/.env',
+                "APP_ENV=production\nADMIN_TOKEN={$c['admin_token']}\n") !== false;
+            return [$ok, $ok ? 'gateway/.env geschrieben.' : 'Konnte gateway/.env nicht schreiben.'];
+
+        case 'env_auth':
+        case 'env_contact':
+        case 'env_content':
+        case 'env_customer':
+            $name = substr($id, 4); // strip "env_"
+            $ok = @file_put_contents($servicesDir . '/' . $name . '/.env', env_for($name, $c)) !== false;
+            return [$ok, $ok ? "services/{$name}/.env geschrieben." : "Konnte services/{$name}/.env nicht schreiben."];
+
+        case 'keys':
+            return generate_keypair($servicesDir . '/auth');
+
+        case 'dir_documents':
+            $dir = $c['document_root_dir'];
+            $ok = is_dir($dir) || @mkdir($dir, 0700, true);
+            return [$ok, $ok ? $dir : "Konnte {$dir} nicht anlegen."];
+
+        case 'dir_blog':
+            $dir = $c['blog_upload_dir'];
+            $ok = is_dir($dir) || @mkdir($dir, 0775, true);
+            return [$ok, $ok ? $dir : "Konnte {$dir} nicht anlegen."];
+
+        case 'migrate_auth':
+        case 'migrate_contact':
+        case 'migrate_content':
+        case 'migrate_customer':
+            $name = substr($id, 8); // strip "migrate_"
+            return run_migration($servicesDir . '/' . $name);
+
+        case 'finalize':
+            $ok = @file_put_contents($lockFile, gmdate('c') . "\n") !== false;
+            return [$ok, $ok ? 'Installation abgeschlossen — Sperre gesetzt.' : 'Konnte .tds-installed nicht schreiben.'];
+    }
+    return [false, "Unbekannter Schritt: {$id}"];
 }
 
 // --- guard: already installed? ----------------------------------------------
@@ -177,6 +275,37 @@ $bundleOk = is_dir($SERVICES_DIR . '/auth') && is_dir($SERVICES_DIR . '/customer
 $step = (int) ($_POST['__step'] ?? $_GET['step'] ?? 1);
 $errors = [];
 $applyResults = null;
+
+// --- AJAX: run a single install task and return JSON -------------------------
+// The apply phase (step 4) is driven one task at a time from the browser so the
+// progress bar can advance and no request runs for minutes. Gate on the lock file
+// only (NOT $alreadyInstalled) — the first task writes services/auth/.env, which
+// would otherwise flip $alreadyInstalled and abort every following task.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['__task'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    @set_time_limit(0);
+    ignore_user_abort(true);
+
+    $fail = static function (string $msg): never {
+        echo json_encode(['ok' => false, 'detail' => $msg], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    };
+
+    if (!$bundleOk) {
+        $fail('Service-Verzeichnisse nicht gefunden — Bundle nicht assembliert.');
+    }
+    if (file_exists($LOCK_FILE)) {
+        $fail('Bereits installiert (.tds-installed vorhanden).');
+    }
+    $c = $_SESSION['tds_install'] ?? null;
+    if (!is_array($c) || ($c['db_user'] ?? '') === '') {
+        $fail('Sitzung abgelaufen — bitte den Assistenten von vorne starten.');
+    }
+
+    [$ok, $detail] = run_task((string) $_POST['__task'], $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
+    echo json_encode(['ok' => $ok, 'detail' => $detail], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
     if ($step === 2) {
@@ -237,30 +366,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
         ]);
         $step = 4; // → review/apply
     } elseif ($step === 4) {
-        // APPLY: write env files, keypair, dirs, migrations.
+        // APPLY (no-JS fallback): run every task in one request. The JS path drives
+        // run_task() one-at-a-time over AJAX with a progress bar; this branch only
+        // fires when JavaScript is off, so lift the time limit and reuse run_task().
+        @set_time_limit(0);
+        ignore_user_abort(true);
         $c = $_SESSION['tds_install'];
         $applyResults = ['env' => [], 'keys' => null, 'dirs' => [], 'migrations' => []];
 
-        // gateway .env (ADMIN_TOKEN gates /wiki; upstream defaults are baked).
-        @file_put_contents($GATEWAY_DIR . '/.env', "APP_ENV=production\nADMIN_TOKEN={$c['admin_token']}\n");
-
-        foreach (['auth', 'contact', 'content', 'customer'] as $name) {
-            $dir = $SERVICES_DIR . '/' . $name;
-            $ok = @file_put_contents($dir . '/.env', env_for($name, $c)) !== false;
+        foreach (['gateway', 'auth', 'contact', 'content', 'customer'] as $name) {
+            $id = $name === 'gateway' ? 'env_gateway' : 'env_' . $name;
+            [$ok] = run_task($id, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
             $applyResults['env'][$name] = $ok;
         }
 
-        $applyResults['keys'] = generate_keypair($SERVICES_DIR . '/auth');
+        $applyResults['keys'] = run_task('keys', $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
 
-        foreach ([$c['document_root_dir'] => 0700, $c['blog_upload_dir'] => 0775] as $dir => $mode) {
-            $applyResults['dirs'][$dir] = is_dir($dir) || @mkdir($dir, $mode, true);
+        foreach (['dir_documents' => 'document_root_dir', 'dir_blog' => 'blog_upload_dir'] as $id => $key) {
+            [$ok, $detail] = run_task($id, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
+            $applyResults['dirs'][$c[$key]] = $ok;
         }
 
         foreach (['auth', 'contact', 'content', 'customer'] as $name) {
-            $applyResults['migrations'][$name] = run_migration($SERVICES_DIR . '/' . $name);
+            $applyResults['migrations'][$name] = run_task('migrate_' . $name, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
         }
 
-        @file_put_contents($LOCK_FILE, gmdate('c') . "\n");
+        run_task('finalize', $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
         $step = 5; // done
     }
 }
@@ -370,6 +501,19 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
   pre{background:var(--ink);color:#f5f3ec;padding:12px 14px;border-radius:8px;overflow:auto;font-family:var(--fm);font-size:12px;max-height:220px}
   .cb{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:14px;color:var(--ink)}
   .muted-line{font-size:13px;color:var(--muted);margin-top:6px}
+  #progress{margin-top:24px}
+  .bar{position:relative;height:12px;border-radius:999px;overflow:hidden;
+    background:color-mix(in srgb,var(--haupt) 10%,var(--soft));border:1px solid var(--line)}
+  .bar>i{position:relative;display:block;height:100%;width:0;border-radius:999px;overflow:hidden;
+    background:linear-gradient(90deg,var(--haupt),var(--akzent));
+    transition:width .45s var(--ease)}
+  .bar>i::after{content:"";position:absolute;inset:0;border-radius:999px;
+    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);
+    background-size:200% 100%;animation:shimmer 1.4s linear infinite}
+  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+  #progressLabel{font-family:var(--fd);font-weight:600;color:var(--ink);margin:12px 0 4px}
+  #log{margin-top:6px}
+  @media (prefers-reduced-motion:reduce){.bar>i{transition:none}.bar>i::after{animation:none}}
   @media (prefers-reduced-motion:reduce){
     .blob{animation:none}
     .card,.note,.check,.steps span.on{animation:none}
@@ -509,14 +653,146 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     <h2>Übersicht &amp; Installation</h2>
     <p>Es werden je Service eine <code>.env</code> geschrieben, das Auth-Schlüsselpaar erzeugt, die Speicherpfade angelegt und die Datenbank-Migrationen ausgeführt.</p>
     <div class="note warn">Vorhandene <code>.env</code>-Dateien werden überschrieben. Secrets liegen danach im Klartext in den Service-Verzeichnissen.</div>
-    <form method="post">
-      <input type="hidden" name="__step" value="4" />
+
+    <div id="review">
       <div class="check"><span class="badge b-ok">DB</span><span><?= h(cfg('db_user')) ?>@<?= h(cfg('db_host')) ?>:<?= h(cfg('db_port')) ?></span></div>
       <div class="check"><span class="badge b-ok">.env</span><span>auth, contact, content, customer + gateway</span></div>
       <div class="check"><span class="badge b-ok">Keys</span><span>Auth RS256-Schlüsselpaar</span></div>
       <div class="check"><span class="badge <?= migrations_available() ? 'b-ok' : 'b-warn' ?>">Migrationen</span><span><?= migrations_available() ? 'phinx je Service' : 'proc_open deaktiviert — manuell nötig' ?></span></div>
-      <button class="btn" type="submit">Jetzt installieren →</button>
-    </form>
+    </div>
+
+    <button class="btn" type="button" id="startBtn" data-tasks='<?= h(json_encode(install_tasks(), JSON_UNESCAPED_UNICODE)) ?>'>Jetzt installieren →</button>
+
+    <!-- Live progress (revealed by JS once the install starts) -->
+    <div id="progress" hidden>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <i id="barFill"></i>
+      </div>
+      <p class="muted-line" id="progressLabel">Installation läuft …</p>
+      <div id="log"></div>
+    </div>
+
+    <!-- Completion panel (revealed by JS when every task is done) -->
+    <div id="donePanel" hidden>
+      <h2 id="doneHeading">Installation abgeschlossen</h2>
+      <div class="note ok">
+        Fertig — es müssen <strong>keine Dienst-Prozesse gestartet</strong> werden: Das Gateway bedient die
+        vier APIs im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die Plattform
+        direkt über <code>/healthz</code> und das interne Wiki unter <code>/wiki</code>.
+      </div>
+      <div class="note err">
+        <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.
+      </div>
+      <form method="post" onsubmit="return confirm('install.php endgültig löschen?');">
+        <input type="hidden" name="__action" value="self_delete" />
+        <button class="btn" type="submit">install.php jetzt löschen</button>
+      </form>
+    </div>
+
+    <noscript>
+      <div class="note warn">JavaScript ist deaktiviert — die Installation läuft als ein einzelner Vorgang (kann ein bis zwei Minuten dauern, kein Fortschrittsbalken).</div>
+      <form method="post">
+        <input type="hidden" name="__step" value="4" />
+        <button class="btn" type="submit">Jetzt installieren →</button>
+      </form>
+    </noscript>
+
+    <script>
+    (function () {
+      var btn = document.getElementById('startBtn');
+      if (!btn) return;
+      var tasks = JSON.parse(btn.getAttribute('data-tasks'));
+      var progress = document.getElementById('progress');
+      var fill = document.getElementById('barFill');
+      var bar = progress.querySelector('.bar');
+      var label = document.getElementById('progressLabel');
+      var log = document.getElementById('log');
+      var review = document.getElementById('review');
+
+      function badge(ok) {
+        var s = document.createElement('span');
+        s.className = 'badge ' + (ok ? 'b-ok' : 'b-err');
+        s.textContent = ok ? 'OK' : 'Fehler';
+        return s;
+      }
+      function row(taskLabel) {
+        var d = document.createElement('div');
+        d.className = 'check';
+        var b = document.createElement('span');
+        b.className = 'badge b-warn';
+        b.textContent = '…';
+        var t = document.createElement('span');
+        t.textContent = taskLabel;
+        d.appendChild(b); d.appendChild(t);
+        log.appendChild(d);
+        return { node: d, badge: b, text: t };
+      }
+      function setProgress(done, total) {
+        var pct = Math.round((done / total) * 100);
+        fill.style.width = pct + '%';
+        bar.setAttribute('aria-valuenow', String(pct));
+      }
+
+      function runTask(id) {
+        var body = new URLSearchParams();
+        body.set('__task', id);
+        return fetch(window.location.pathname, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
+          body: body.toString(),
+          credentials: 'same-origin'
+        }).then(function (r) { return r.json(); })
+          .catch(function (e) { return { ok: false, detail: 'Netzwerkfehler: ' + e }; });
+      }
+
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        if (review) review.hidden = true;
+        progress.hidden = false;
+        var total = tasks.length, i = 0, anyFail = false;
+
+        function next() {
+          if (i >= total) {
+            label.textContent = anyFail
+              ? 'Abgeschlossen — einige Schritte sind fehlgeschlagen (siehe oben).'
+              : 'Alle Schritte erfolgreich abgeschlossen.';
+            var heading = document.getElementById('doneHeading');
+            if (anyFail) heading.textContent = 'Installation mit Fehlern abgeschlossen';
+            // Reflect completion in the step indicator.
+            var spans = document.querySelectorAll('.steps span');
+            if (spans[3]) { spans[3].className = 'done'; }
+            if (spans[4]) { spans[4].className = 'on'; }
+            document.getElementById('donePanel').hidden = false;
+            return;
+          }
+          var task = tasks[i];
+          label.textContent = 'Schritt ' + (i + 1) + ' von ' + total + ': ' + task[1];
+          var r = row(task[1]);
+          runTask(task[0]).then(function (res) {
+            r.badge.className = 'badge ' + (res.ok ? 'b-ok' : 'b-err');
+            r.badge.textContent = res.ok ? 'OK' : 'Fehler';
+            if (res.detail) {
+              if (res.ok) {
+                var hint = document.createElement('span');
+                hint.style.color = 'var(--muted)';
+                hint.textContent = ' — ' + res.detail;
+                r.text.appendChild(hint);
+              } else {
+                anyFail = true;
+                var pre = document.createElement('pre');
+                pre.textContent = res.detail;
+                r.node.insertAdjacentElement('afterend', pre);
+              }
+            }
+            i++;
+            setProgress(i, total);
+            next();
+          });
+        }
+        next();
+      });
+    })();
+    </script>
 
   <?php elseif ($step === 5): ?>
     <?php $res = $applyResults; ?>

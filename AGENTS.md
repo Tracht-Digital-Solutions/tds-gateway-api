@@ -223,10 +223,21 @@ needed). That asymmetric failure is the tell for an unset/expired token.
 - Writes `services/<name>/.env` (+ gateway `.env`) from the same templates as
   the `.env.example`s / `deploy/docker-entrypoint.sh`; keep all three in sync
   when a service gains an env var.
+- **Apply phase is a per-task AJAX driver, not one blocking POST.** Step 4 runs
+  each install step (`install_tasks()` / `run_task()`: env writes → keypair →
+  dirs → the four phinx migrations → finalize) as its own small JSON request
+  while a progress bar advances. This replaced the old "do everything in one
+  request" apply that appeared to hang (four serial migrations blew past
+  `max_execution_time`; `run_migration` blocked forever on `stream_get_contents`).
+  Now: tasks run with `set_time_limit(0)`, `run_migration` reads non-blocking
+  against a 120s deadline (`proc_terminate` on timeout), and the per-task guard
+  keys on the **`.tds-installed` lock only** (NOT `services/auth/.env`) — the
+  first task writes that `.env`, so an `$alreadyInstalled`-style guard there would
+  abort every later task. A `<noscript>` form keeps the single-request fallback.
 - **Security:** refuses to run once a `.tds-installed` lock (bundle root) or
-  `services/auth/.env` exists, and offers self-delete. It ships in every bundle
-  and is an open setup endpoint **before** first install — docs tell operators
-  to delete it / IP-restrict during setup.
+  `services/auth/.env` exists (wizard entry guard), and offers self-delete. It
+  ships in every bundle and is an open setup endpoint **before** first install —
+  docs tell operators to delete it / IP-restrict during setup.
 
 ## Tests
 
