@@ -56,7 +56,7 @@ final class MigrationRunner
         ?callable $migrate = null,
         private readonly int $timeout = 90,
     ) {
-        $this->migrate = $migrate ?? fn (string $dir): array => $this->migrateService($dir);
+        $this->migrate = $migrate ?? fn (string $dir): array => self::migrateServiceDir($dir, $this->timeout);
     }
 
     /** Best-effort entry point — brings every service up to date, never throws. */
@@ -157,17 +157,23 @@ final class MigrationRunner
         return substr(hash('sha256', implode('|', $names)), 0, 16);
     }
 
-    /** Migrate one service — in-process Phinx first, subprocess as a fallback. */
-    private function migrateService(string $serviceDir): array
+    /**
+     * Migrate one service dir — in-process Phinx first, subprocess as a fallback.
+     * Public + static so the web installer (install.php) can reuse the exact same
+     * in-process path (it has no proc_open on this host).
+     *
+     * @return array{0: bool, 1: string} [ok, output]
+     */
+    public static function migrateServiceDir(string $serviceDir, int $timeout = 90): array
     {
         $autoload = $serviceDir . '/vendor/autoload.php';
         if (is_file($autoload)) {
             require_once $autoload; // service vendor ships Phinx (added post --no-dev)
             if (class_exists(\Phinx\Migration\Manager::class)) {
-                return $this->phinxInProcess($serviceDir);
+                return self::phinxInProcess($serviceDir);
             }
         }
-        return $this->phinxSubprocess($serviceDir);
+        return self::phinxSubprocess($serviceDir, $timeout);
     }
 
     /**
@@ -179,9 +185,9 @@ final class MigrationRunner
      * service's phinx.php (`phinx_migration`, mysql, utf8mb4) — kept in sync with
      * those configs.
      */
-    private function phinxInProcess(string $serviceDir): array
+    private static function phinxInProcess(string $serviceDir): array
     {
-        $env = $this->readEnvFile($serviceDir . '/.env');
+        $env = self::readEnvFile($serviceDir . '/.env');
         if (($env['DB_NAME'] ?? '') === '') {
             return [false, "in-process: DB_NAME missing from {$serviceDir}/.env"];
         }
@@ -221,7 +227,7 @@ final class MigrationRunner
     }
 
     /** Minimal `.env` reader — KEY=VALUE, ignores comments; never touches globals. */
-    private function readEnvFile(string $file): array
+    private static function readEnvFile(string $file): array
     {
         if (!is_file($file)) {
             return [];
@@ -251,7 +257,7 @@ final class MigrationRunner
      * Fallback: `php vendor/bin/phinx migrate -e production` in $serviceDir, for
      * hosts where in-process Phinx isn't available. Needs proc_open + a CLI php.
      */
-    private function phinxSubprocess(string $serviceDir): array
+    private static function phinxSubprocess(string $serviceDir, int $timeout): array
     {
         if (!self::procOpenAvailable()) {
             return [false, 'proc_open disabled and in-process Phinx unavailable — migrate manually'];
@@ -270,7 +276,7 @@ final class MigrationRunner
         stream_set_blocking($pipes[2], false);
 
         $out = '';
-        $deadline = microtime(true) + $this->timeout;
+        $deadline = microtime(true) + $timeout;
         while (true) {
             $status = proc_get_status($proc);
             $out .= (string) stream_get_contents($pipes[1]);
@@ -283,7 +289,7 @@ final class MigrationRunner
                 fclose($pipes[1]);
                 fclose($pipes[2]);
                 proc_close($proc);
-                return [false, "timed out after {$this->timeout}s\n" . trim($out)];
+                return [false, "timed out after {$timeout}s\n" . trim($out)];
             }
             usleep(100_000);
         }

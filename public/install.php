@@ -175,12 +175,24 @@ function generate_keypair(string $authDir): array
  */
 function run_migration(string $serviceDir, int $timeout = 120): array
 {
+    // Prefer the gateway's in-process migrator (Phinx's Manager API): it needs no
+    // proc_open and no CLI php — which is exactly why the old shell-out silently
+    // applied nothing and left the prod DBs empty on this host. Fall back to the
+    // subprocess below only if the gateway autoloader / Phinx can't be loaded.
+    $gatewayAutoload = dirname(__DIR__) . '/vendor/autoload.php'; // <bundle>/gateway/vendor
+    if (is_file($gatewayAutoload)) {
+        require_once $gatewayAutoload;
+        if (class_exists(\Tds\ApiGateway\Support\MigrationRunner::class)) {
+            return \Tds\ApiGateway\Support\MigrationRunner::migrateServiceDir($serviceDir, $timeout);
+        }
+    }
+
     $phinx = $serviceDir . '/vendor/bin/phinx';
     if (!is_file($phinx)) {
         return [false, 'phinx nicht gefunden (vendor/ fehlt im Bundle).'];
     }
     if (!migrations_available()) {
-        return [false, 'proc_open ist deaktiviert — Migration bitte manuell ausführen (siehe unten).'];
+        return [false, 'proc_open ist deaktiviert und In-Process-Migration nicht verfügbar — Migration bitte manuell ausführen (siehe unten).'];
     }
     $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $cmd = [php_cli_binary(), 'vendor/bin/phinx', 'migrate', '-e', 'production'];
@@ -302,12 +314,34 @@ $applyResults = null;
 // only (NOT $alreadyInstalled) — the first task writes services/auth/.env, which
 // would otherwise flip $alreadyInstalled and abort every following task.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['__task'])) {
+    // This endpoint MUST return JSON no matter what. A stray PHP warning/notice
+    // rendered as HTML (`<br /><b>Warning</b>…`) would make the browser's
+    // r.json() choke with "Unexpected token '<'". So: suppress HTML error output
+    // and install a shutdown guard that still emits a JSON error if a fatal kills
+    // the script before we responded.
     header('Content-Type: application/json; charset=utf-8');
+    ini_set('display_errors', '0');
+    ini_set('html_errors', '0');
+    error_reporting(E_ALL);
     @set_time_limit(0);
     ignore_user_abort(true);
 
-    $fail = static function (string $msg): never {
-        echo json_encode(['ok' => false, 'detail' => $msg], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $responded = false;
+    $respond = static function (bool $ok, string $detail) use (&$responded): void {
+        if ($responded) {
+            return;
+        }
+        $responded = true;
+        echo json_encode(['ok' => $ok, 'detail' => $detail], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    };
+    register_shutdown_function(static function () use ($respond): void {
+        $e = error_get_last();
+        if ($e !== null && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+            $respond(false, 'PHP-Fatal: ' . $e['message'] . ' @ ' . basename((string) $e['file']) . ':' . $e['line']);
+        }
+    });
+    $fail = static function (string $msg) use ($respond): never {
+        $respond(false, $msg);
         exit;
     };
 
@@ -322,8 +356,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['__task'])) {
         $fail('Sitzung abgelaufen — bitte den Assistenten von vorne starten.');
     }
 
-    [$ok, $detail] = run_task((string) $_POST['__task'], $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
-    echo json_encode(['ok' => $ok, 'detail' => $detail], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    try {
+        [$ok, $detail] = run_task((string) $_POST['__task'], $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
+        $respond((bool) $ok, (string) $detail);
+    } catch (\Throwable $e) {
+        $respond(false, 'Ausnahme: ' . $e->getMessage());
+    }
     exit;
 }
 
@@ -435,116 +473,82 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex" />
 <title>TDS API — Installation</title>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-  :root{--haupt:#050f68;--akzent:#820933;--paper:#fafaf7;--soft:#f1efe8;--line:#e8e6df;
-    --ink:#1a1a17;--muted:#6b6b66;--card:#fff;--ok:#146c43;--okbg:#e6f4ea;--err:#a51d1d;--errbg:#fbeaea;
-    --fd:"Hanken Grotesk",system-ui,sans-serif;--fb:"Plus Jakarta Sans",system-ui,sans-serif;--fm:"JetBrains Mono",monospace;
-    --ease:cubic-bezier(.22,1,.36,1);}
+  /* Flat design — matches the admin/customer panels: solid surfaces, hairlines
+     + accent bars, one navy accent, 0.75rem radius. No gradients, no blur, no
+     lifted shadows, no decorative motion. */
+  :root{--haupt:#050f68;--akzent:#820933;--paper:#fafaf7;--soft:#f1efe8;--line:#e4e2da;
+    --ink:#1a1a17;--muted:#6b6b66;--card:#fff;
+    --ok:#146c43;--okbg:#e6f4ea;--err:#a51d1d;--errbg:#fbeaea;--warn:#8a5a00;--warnbg:#fff4d6;
+    --tint:color-mix(in srgb,var(--haupt) 7%,var(--paper));
+    --serif:"Instrument Serif",Georgia,serif;
+    --fd:"Hanken Grotesk",system-ui,sans-serif;--fb:"Plus Jakarta Sans",system-ui,sans-serif;
+    --fm:"JetBrains Mono",ui-monospace,monospace;}
   *{box-sizing:border-box}
-  body{margin:0;font-family:var(--fb);background:var(--paper);color:var(--ink);line-height:1.55;
-    min-height:100vh;position:relative;overflow-x:hidden}
+  body{margin:0;font-family:var(--fb);background:var(--paper);color:var(--ink);line-height:1.55;min-height:100vh}
 
-  /* Animated brand aurora behind the card */
-  .bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
-  .blob{position:absolute;border-radius:50%;filter:blur(72px);opacity:.45;will-change:transform}
-  .blob.b1{width:46vmax;height:46vmax;left:-12vmax;top:-16vmax;
-    background:radial-gradient(circle,color-mix(in srgb,var(--haupt) 60%,transparent),transparent 70%);
-    animation:drift1 26s ease-in-out infinite}
-  .blob.b2{width:40vmax;height:40vmax;right:-14vmax;top:6vmax;
-    background:radial-gradient(circle,color-mix(in srgb,var(--akzent) 55%,transparent),transparent 70%);
-    animation:drift2 31s ease-in-out infinite}
-  .blob.b3{width:36vmax;height:36vmax;left:24vmax;bottom:-22vmax;
-    background:radial-gradient(circle,color-mix(in srgb,var(--haupt) 40%,transparent),transparent 70%);
-    animation:drift1 37s ease-in-out infinite reverse}
-  @keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(6vmax,4vmax) scale(1.12)}}
-  @keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-5vmax,6vmax) scale(1.08)}}
-
-  .wrap{max-width:740px;margin:0 auto;padding:clamp(28px,6vw,64px) 20px 80px}
-  .card{position:relative;background:color-mix(in srgb,var(--card) 82%,transparent);
-    backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);
-    border:1px solid color-mix(in srgb,var(--haupt) 12%,var(--line));border-radius:24px;
-    padding:clamp(24px,4vw,44px);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 30px 70px -30px rgba(5,15,104,.45);
-    animation:rise .6s var(--ease) both}
-  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
-  @keyframes pop{0%{transform:scale(.92)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
-  @keyframes slidein{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
-  @keyframes draw{to{width:68px}}
+  .wrap{max-width:720px;margin:0 auto;padding:clamp(28px,6vw,56px) 20px 80px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:clamp(24px,4vw,40px)}
 
   .brandmark{display:inline-flex;align-items:center;gap:10px;margin-bottom:14px}
-  .brandmark .mk{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#fff;
-    font-family:var(--fd);font-weight:800;font-size:16px;
-    background:linear-gradient(135deg,var(--haupt),color-mix(in srgb,var(--haupt) 55%,var(--akzent)));
-    box-shadow:0 8px 20px -8px var(--haupt)}
-  .brandmark .wd{font-family:var(--fd);font-weight:700;letter-spacing:-.01em;font-size:15px}
+  .brandmark .mk{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:#fff;
+    font-family:var(--fd);font-weight:800;font-size:16px;background:var(--haupt)}
+  .brandmark .wd{font-family:var(--serif);font-weight:400;font-size:18px;letter-spacing:.01em}
   .brandmark .wd i{font-style:italic;color:var(--akzent)}
 
-  h1{font-family:var(--fd);font-weight:800;letter-spacing:-.03em;font-size:clamp(28px,5vw,40px);
-    margin:0 0 6px;position:relative;display:inline-block}
-  h1::after{content:"";position:absolute;left:0;bottom:-7px;height:4px;width:0;border-radius:2px;
-    background:linear-gradient(90deg,var(--haupt),var(--akzent));animation:draw .8s .35s var(--ease) forwards}
+  h1{font-family:var(--fd);font-weight:800;letter-spacing:-.03em;font-size:clamp(28px,5vw,38px);
+    margin:0 0 12px;position:relative;display:inline-block}
+  h1::after{content:"";position:absolute;left:0;bottom:-6px;height:3px;width:52px;background:var(--haupt)}
   .eyebrow{font-family:var(--fd);font-weight:700;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--akzent);margin:0 0 8px}
-  h2{font-family:var(--fd);font-weight:700;letter-spacing:-.02em;font-size:22px;margin:30px 0 6px}
+  h2{font-family:var(--fd);font-weight:700;letter-spacing:-.02em;font-size:21px;margin:30px 0 6px}
   p{margin:0 0 14px;color:var(--muted)}
   code{font-family:var(--fm);font-size:.85em;background:var(--soft);padding:.1em .4em;border-radius:4px}
+
   .steps{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 30px;font-size:13px}
-  .steps span{display:inline-flex;align-items:center;padding:6px 13px;border-radius:999px;border:1px solid var(--line);
-    color:var(--muted);background:color-mix(in srgb,var(--card) 55%,transparent);transition:all .3s var(--ease)}
-  .steps span.on{background:var(--haupt);color:#fff;border-color:var(--haupt);font-weight:600;
-    box-shadow:0 8px 20px -10px var(--haupt);animation:pop .45s var(--ease)}
-  .steps span.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--line));color:var(--ok);
-    background:color-mix(in srgb,var(--okbg) 70%,transparent)}
+  .steps span{display:inline-flex;align-items:center;padding:6px 12px;border-radius:8px;border:1px solid var(--line);
+    color:var(--muted);background:var(--paper)}
+  .steps span.on{background:var(--haupt);color:#fff;border-color:var(--haupt);font-weight:600}
+  .steps span.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--line));color:var(--ok);background:var(--okbg)}
+
   label{display:block;font-weight:600;font-size:14px;margin:14px 0 5px}
   label .opt{font-weight:400;color:var(--muted);font-size:12px}
-  input[type=text],input[type=password]{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:9px;
-    font-family:var(--fm);font-size:14px;background:#fff;transition:border-color .2s ease,box-shadow .2s ease}
-  input:focus{outline:none;border-color:var(--haupt);box-shadow:0 0 0 3px rgba(5,15,104,.16)}
+  input[type=text],input[type=password]{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:8px;
+    font-family:var(--fm);font-size:14px;background:#fff;color:var(--ink);transition:border-color .15s ease,box-shadow .15s ease}
+  input:focus{outline:none;border-color:var(--haupt);box-shadow:0 0 0 2px color-mix(in srgb,var(--haupt) 18%,transparent)}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .grid4{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  fieldset{border:1px solid var(--line);border-radius:14px;padding:18px;margin:20px 0;
-    background:color-mix(in srgb,var(--card) 50%,transparent)}
+  fieldset{border:1px solid var(--line);border-radius:12px;padding:18px;margin:20px 0;background:var(--tint)}
   legend{font-family:var(--fd);font-weight:700;padding:0 8px;font-size:14px}
-  .btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:11px;color:#fff;
-    background:linear-gradient(135deg,var(--haupt),color-mix(in srgb,var(--haupt) 78%,var(--akzent)));
-    font-family:var(--fd);font-weight:600;font-size:15px;padding:12px 24px;cursor:pointer;text-decoration:none;margin-top:20px;
-    box-shadow:0 10px 24px -12px var(--haupt);transition:transform .18s var(--ease),box-shadow .18s var(--ease)}
-  .btn:hover{transform:translateY(-2px);box-shadow:0 16px 32px -12px var(--haupt)}
-  .btn:active{transform:translateY(0)}
-  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);box-shadow:none}
-  .check{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;
-    animation:slidein .5s var(--ease) both}
-  .badge{font-family:var(--fm);font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
-  .b-ok{background:var(--okbg);color:var(--ok)} .b-err{background:var(--errbg);color:var(--err)} .b-warn{background:#fff4d6;color:#8a5a00}
-  .note{padding:13px 16px;border-radius:11px;font-size:14px;margin:14px 0;animation:rise .5s var(--ease) both}
-  .note.err{background:var(--errbg);color:var(--err)} .note.ok{background:var(--okbg);color:var(--ok)} .note.warn{background:#fff4d6;color:#8a5a00}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--haupt);border-radius:10px;color:#fff;
+    background:var(--haupt);font-family:var(--fd);font-weight:600;font-size:15px;padding:11px 22px;cursor:pointer;
+    text-decoration:none;margin-top:20px;transition:background .15s ease}
+  .btn:hover{background:color-mix(in srgb,var(--haupt) 88%,#000)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn.ghost{background:transparent;color:var(--haupt);border-color:var(--line)}
+  .btn.ghost:hover{background:var(--tint)}
+
+  .check{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .badge{font-family:var(--fm);font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;white-space:nowrap}
+  .b-ok{background:var(--okbg);color:var(--ok)} .b-err{background:var(--errbg);color:var(--err)} .b-warn{background:var(--warnbg);color:var(--warn)}
+  .note{padding:12px 15px;border-radius:10px;font-size:14px;margin:14px 0;border-left:3px solid transparent}
+  .note.err{background:var(--errbg);color:var(--err);border-left-color:var(--err)}
+  .note.ok{background:var(--okbg);color:var(--ok);border-left-color:var(--ok)}
+  .note.warn{background:var(--warnbg);color:var(--warn);border-left-color:var(--warn)}
   pre{background:var(--ink);color:#f5f3ec;padding:12px 14px;border-radius:8px;overflow:auto;font-family:var(--fm);font-size:12px;max-height:220px}
   .cb{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:14px;color:var(--ink)}
   .muted-line{font-size:13px;color:var(--muted);margin-top:6px}
+
   #progress{margin-top:24px}
-  .bar{position:relative;height:12px;border-radius:999px;overflow:hidden;
-    background:color-mix(in srgb,var(--haupt) 10%,var(--soft));border:1px solid var(--line)}
-  .bar>i{position:relative;display:block;height:100%;width:0;border-radius:999px;overflow:hidden;
-    background:linear-gradient(90deg,var(--haupt),var(--akzent));
-    transition:width .45s var(--ease)}
-  .bar>i::after{content:"";position:absolute;inset:0;border-radius:999px;
-    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);
-    background-size:200% 100%;animation:shimmer 1.4s linear infinite}
-  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+  .bar{height:10px;border-radius:6px;overflow:hidden;background:var(--soft);border:1px solid var(--line)}
+  .bar>i{display:block;height:100%;width:0;background:var(--haupt);transition:width .35s ease}
   #progressLabel{font-family:var(--fd);font-weight:600;color:var(--ink);margin:12px 0 4px}
   #log{margin-top:6px}
-  @media (prefers-reduced-motion:reduce){.bar>i{transition:none}.bar>i::after{animation:none}}
-  @media (prefers-reduced-motion:reduce){
-    .blob{animation:none}
-    .card,.note,.check,.steps span.on{animation:none}
-    h1::after{animation:none;width:68px}
-  }
+  @media (prefers-reduced-motion:reduce){.bar>i,input{transition:none}}
 </style>
 </head>
 <body>
-<div class="bg" aria-hidden="true">
-  <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
-</div>
 <main class="wrap">
 <div class="card">
   <div class="brandmark"><span class="mk">T</span><span class="wd">Tracht <i>Digital</i></span></div>
@@ -585,7 +589,12 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       }
       $writable = is_writable($SERVICES_DIR . '/auth') && is_writable($SERVICES_DIR . '/customer');
       $checks[] = ['Service-Verzeichnisse beschreibbar', $writable, 'für .env + Schlüssel'];
-      $checks[] = ['Migrationen ausführbar (proc_open)', migrations_available(), 'sonst manuell nötig'];
+      // Migrations run in-process via the gateway's MigrationRunner (Phinx
+      // Manager API) — no proc_open needed. Available whenever the gateway
+      // vendor/ is present; proc_open is only the legacy fallback.
+      $inProcessMig = is_file($GATEWAY_DIR . '/vendor/autoload.php');
+      $checks[] = ['Migrationen ausführbar', $inProcessMig || migrations_available(),
+          $inProcessMig ? 'in-process (Phinx) — kein proc_open nötig' : 'via proc_open (Fallback)'];
       $hardFail = !version_compare(PHP_VERSION, '8.1.0', '>=')
         || !extension_loaded('pdo_mysql') || !extension_loaded('openssl') || !$writable;
     ?>
