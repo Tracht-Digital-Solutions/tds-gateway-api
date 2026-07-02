@@ -29,7 +29,9 @@ literally `/contact`, so it is mapped with a `/contact` rewrite
 
 - `GET /` — navigation: lists the public service prefixes.
 - `GET /healthz` — aggregated health; pings every upstream's `/healthz`
-  with a short timeout. `200` when all healthy, `503` otherwise.
+  with a short timeout. `200` when all healthy, `503` otherwise — including
+  when a service is reachable but un-migrated (its `db` field reports
+  `ok | no-schema | down`, and `no-schema`/`down` flip the aggregate to `503`).
 - `GET /wiki` — the internal **API wiki** (auto-generated route reference
   for every service). Login-gated by `ADMIN_TOKEN`; disabled (`404`) when
   that env is unset, so it is never reachable without being logged in.
@@ -52,6 +54,19 @@ an existing `services/auth/.env`), and the final screen offers to delete
 itself. **Delete `gateway/public/install.php` once you're live** (and ideally
 IP-restrict `/install.php` during setup) — before the first install it is an
 open setup endpoint.
+
+## Automatic migrations
+
+Once each service's `.env` + database exist, **migrations apply themselves** —
+no manual step. On the first request after a deploy, `Bootstrap::autoMigrate()`
+brings every bundled service's schema up to date **in-process** (Phinx's
+`Manager` API — no `proc_open`, no CLI php, which is what makes it work on
+locked-down Plesk hosts where the installer's shell-out silently applied
+nothing). It's guarded to run at most once per migration-set (a marker under
+`gateway/var/`, single-flight `flock`) and is best-effort — a failure is logged
+and surfaced as `db:no-schema` in `/healthz` rather than taking the gateway
+down. In-process mode only; disable with `GATEWAY_AUTO_MIGRATE=0`. See
+`AGENTS.md` → *Auto-migration* for the full contract.
 
 ## API wiki
 

@@ -114,9 +114,9 @@ direkt aus `services/<name>/` (jeweils eigenes `vendor/`) und führt sie **im
 selben PHP-FPM-Request** aus. Es laufen **keine** `php -S`-Prozesse, kein
 Supervisor, kein Watchdog — PHP-FPM bedient alle vier APIs on demand. Genau das
 macht „auf Plesk ohne SSH installieren und starten" möglich: Nach 4.1 (Docroot
-auf `gateway/public`) ist die Plattform startklar, sobald 4.3/4.4 (`.env` +
-Migrationen — am einfachsten über `/install.php`) erledigt sind. **Es gibt
-nichts zu starten.**
+auf `gateway/public`) ist die Plattform startklar, sobald 4.3 (`.env` je Service)
+und die DBs (4.4, Schritt 1) stehen — **Migrationen laufen automatisch beim ersten
+Request** (4.4). **Es gibt nichts zu starten und nichts von Hand zu migrieren.**
 
 Die Service-Verzeichnisse müssen neben dem Gateway liegen
 (`<zielpfad>/services/<name>`, genau so wie das Bundle es ausliefert).
@@ -162,8 +162,26 @@ Details je Service: das `INSTALL.md` im jeweiligen API-Repo.
 1. In Plesk je Service eine MariaDB-Datenbank + eigenen DB-User anlegen
    (`tds_auth`, `tds_contact_ratelimit`, `tds_content`, `tds_customer` — Namen
    frei, müssen nur zur jeweiligen `.env` passen).
-2. Migrationen laufen **aus dem Bundle** (Phinx liegt im `vendor/` jedes
-   Service; `production` ist das Default-Environment der `phinx.php`):
+2. **Migrationen laufen automatisch.** Beim ersten Request nach einem Deploy
+   bringt das Gateway das Schema jedes Service selbst auf Stand — **in-process
+   über Phinx' `Manager`-API, ohne `proc_open` und ohne CLI-`php`**. Das ist
+   bewusst so gebaut: viele Plesk-Hosts deaktivieren `proc_open`, weshalb der
+   frühere Shell-Aufruf von Phinx (auch im Installer) still gar nichts anwendete
+   und die Prod-DB leer ließ. Sobald die DBs (Schritt 1) und die
+   `services/<name>/.env` (4.3) stehen, ist **kein manueller Migrationsschritt
+   nötig** — der erste Aufruf von z. B. `/content/blog` migriert und antwortet
+   dann normal. Idempotent und pro Migrations-Satz genau einmal (Marker unter
+   `gateway/var/`); mit `GATEWAY_AUTO_MIGRATE=0` in der Gateway-`.env`
+   abschaltbar.
+
+   > **Kontrolle:** `curl https://api.tracht-digital.de/healthz`. Ein Service mit
+   > `"db":"no-schema"` (Aggregat dann `503`) = DB erreichbar, aber noch nicht
+   > migriert — meist nur der allererste Request nach dem Deploy, danach `"ok"`.
+
+3. **Fallback (nur falls die Auto-Migration scheitert)** — z. B. wenn in den
+   Gateway-Logs (`gateway/logs/gateway.log`) `auto-migrate … failed` steht.
+   Migrationen laufen **aus dem Bundle** (Phinx liegt im `vendor/` jedes Service;
+   `production` ist das Default-Environment der `phinx.php`):
 
 ```sh
 cd <zielpfad>
@@ -177,20 +195,22 @@ done
 
 ### 4.5 Deploy-Aktionen + Webhook
 
-In der Git-Extension der `api.`-Subdomain unter *„Bereitstellungsaktionen"*
-hinterlegen (läuft nach jedem Pull):
+Im In-Process-Modus sind **keine Prozess-Neustarts** und **kein manueller
+Migrationsschritt** nötig: Das Gateway baut die Service-App bei jedem Request
+frisch (neuer Code greift sofort) und wendet neue Migrationen beim ersten
+Request automatisch an (4.4). Eine *„Bereitstellungsaktion"* für Migrationen ist
+daher **optional** — sinnvoll nur, wenn `proc_open` und CLI-`php` verfügbar sind
+und man das Schema schon vor dem ersten echten Request setzen will:
 
 ```sh
+# optional — die Auto-Migration erledigt das sonst beim ersten Request
 for name in auth contact content customer; do
   (cd "services/$name" && /opt/plesk/php/8.3/bin/php vendor/bin/phinx migrate -e production)
 done
 ```
 
-Im In-Process-Modus sind **keine Prozess-Neustarts** nötig — das Gateway baut die
-Service-App bei jedem Request frisch, neuer Code greift sofort. Hält OPcache nach
-einem Pull alte Dateien, in Plesk einmal *PHP-FPM neu laden* (oder
-`opcache.validate_timestamps` an lassen). Bequemer als die Schleife oben:
-`PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/migrate-stack.sh`.
+Hält OPcache nach einem Pull alte Dateien, in Plesk einmal *PHP-FPM neu laden*
+(oder `opcache.validate_timestamps` an lassen).
 
 Die *Webhook-URL* dieser Git-Instanz als Secret `DEPLOY_WEBHOOK_URL` im
 **tds-api-gateway-Repo** hinterlegen — und **nur dort**. Die vier API-Repos
@@ -203,9 +223,15 @@ API-CIs überspringen sich bei unbesetztem Secret lautlos.)
 
 ```sh
 curl https://api.tracht-digital.de/                 # Prefix-Navigation (Gateway lebt)
-curl https://api.tracht-digital.de/healthz          # aggregierte Service-Health
+curl https://api.tracht-digital.de/healthz          # aggregierte Service-Health (200 = alle grün)
 curl https://api.tracht-digital.de/content/blog     # → content-api
 ```
+
+`/healthz` liefert pro Service ein `db`-Feld: `ok` = migriert und bereit,
+`no-schema` = DB erreichbar, aber (noch) nicht migriert, `down` = DB nicht
+erreichbar. Bei `no-schema`/`down` geht das Aggregat auf `503`. Direkt nach dem
+Erst-Deploy kann der allererste Request `no-schema` zeigen, während die
+Auto-Migration läuft — ein zweiter Aufruf sollte `ok` sein.
 
 `BUILD_INFO.json` im Zielpfad zeigt, aus welchen Quell-Commits das laufende
 Bundle gebaut wurde.
@@ -219,9 +245,10 @@ Bundle gebaut wurde.
 3. ☐ **In allen 5 Repos einmal den `release`-Workflow** (*Actions → Release → Run
    workflow*) ausführen, damit der `release`-Branch existiert.
 4. ☐ `api.`: Git-Checkout (`release`), Docroot auf `gateway/public`, DBs + DB-User,
-   `.env`-Dateien + `private.pem`, Migrationen (am einfachsten alles via
-   `/install.php`), Deploy-Aktionen + Webhook-Secret setzen, `/healthz` grün.
-   **Keine Service-Prozesse zu starten** (In-Process-Modus).
+   `.env`-Dateien + `private.pem` (am einfachsten alles via `/install.php`),
+   Webhook-Secret setzen, `/healthz` grün. **Migrationen laufen automatisch beim
+   ersten Request** (kein manueller Schritt) und **keine Service-Prozesse zu
+   starten** (In-Process-Modus).
 5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
    Webhook-Secrets in den vier Frontend-Repos setzen.
 6. ☐ **`tds-blog` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
@@ -239,6 +266,12 @@ Bundle gebaut wurde.
   „status 0" fehlt das Service-Verzeichnis bzw. dessen `vendor/` (Bundle prüfen,
   `GATEWAY_SERVICES_DIR`). Im Proxy-Modus: der jeweilige `php -S`-Prozess läuft
   nicht (Watchdog-Task) oder Port-Mismatch zum `*_UPSTREAM`.
+- **`/healthz` meldet `"db":"no-schema"` (Aggregat `503`), Endpoints geben 500**
+  → DB erreichbar, aber nicht migriert. Normalerweise migriert das Gateway beim
+  ersten Request selbst; bleibt es dabei, in `gateway/logs/gateway.log` nach
+  `auto-migrate … failed`/`skipped` sehen. Häufig: `gateway/var/` nicht
+  beschreibbar (fällt auf das System-Temp zurück), oder ein `.env` mit falschen
+  DB-Zugängen. Notfalls die Migrations-Schleife aus 4.4 (Fallback) laufen lassen.
 - **Frontend-CI grün, aber Site nicht aktualisiert** → Webhook-Secret fehlt/falsch;
   die CI wertet das nur als gelbe Warnung, nie als roten Build
   (Annotations des Runs prüfen). Zeigt die Warnung **HTTP 404**, obwohl Host/Port

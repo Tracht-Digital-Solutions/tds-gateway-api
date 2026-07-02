@@ -85,9 +85,16 @@ Ways to run the surface — pick one:
 3. **Proxy — nginx only** (no PHP gateway process). Run just the four services
    and use `deploy/nginx.conf.example` to prefix-route straight to their ports.
 
-Migrations run **from the bundle**: the assemble workflow re-adds phinx
-after the `--no-dev` install, so
-`php vendor/bin/phinx migrate -e production` works inside each
+**Migrations apply automatically** (in-process mode). Once each service's `.env`
++ database exist, the gateway brings every schema up to date on the first request
+after a deploy — **in-process via Phinx's `Manager` API** (no `proc_open`, no CLI
+php), guarded to run once per migration-set, best-effort. So on Plesk there's no
+manual migration step; a failure surfaces as `db:no-schema` in `/healthz` (aggregate
+`503`) instead of a silent empty DB. Disable with `GATEWAY_AUTO_MIGRATE=0`.
+
+If you'd rather migrate by hand (or auto-migration is off / fell back), migrations
+also run **from the bundle**: the assemble workflow re-adds phinx after the
+`--no-dev` install, so `php vendor/bin/phinx migrate -e production` works inside each
 `services/<name>/` without a composer install on the host (the web installer at
 `/install.php` and `bin/migrate-stack.sh` both do this for you).
 
