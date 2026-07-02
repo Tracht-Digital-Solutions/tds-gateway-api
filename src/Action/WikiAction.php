@@ -5,50 +5,51 @@ namespace Tds\ApiGateway\Action;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Tds\ApiGateway\Support\AdminSessionVerifier;
 
 /**
- * Serves the auto-generated API wiki at `/wiki` — but only to a logged-in
- * operator. The wiki is internal (route map of every backend), so it is
- * gated by the shared ADMIN_TOKEN, the same secret the admin panel uses.
+ * Serves the auto-generated API wiki HTML at `/wiki` — but only to a logged-in
+ * operator. The wiki is internal (route map of every backend), so it is gated
+ * by {@see AdminSessionVerifier}: either the legacy shared ADMIN_TOKEN
+ * (Bearer / `?token=` / `tds_wiki` cookie) or a valid admin `tds_session`
+ * cookie. A correct `?token=` sets the cookie and redirects to a clean `/wiki`
+ * URL so the token leaves the address bar. Without a valid credential a small
+ * login form is shown.
  *
- * Auth is accepted via (in order): `Authorization: Bearer`, a `?token=`
- * query param, or the `tds_wiki` cookie. A correct `?token=` sets the
- * cookie and redirects to a clean `/wiki` URL so the token leaves the
- * address bar. Without a valid token a small login form is shown.
+ * When no credential path is configured the wiki is disabled (404) rather than
+ * open — "you must be logged in" must hold even if the gateway is misconfigured.
  *
- * When ADMIN_TOKEN is unset the wiki is disabled (404) rather than open —
- * "you must be logged in" must hold even if the gateway is misconfigured.
+ * The structured JSON the admin panel renders in-app is served separately by
+ * {@see WikiDataAction} at `/wiki.json`.
  */
 final class WikiAction
 {
     public function __construct(
-        private readonly string $adminToken,
+        private readonly AdminSessionVerifier $verifier,
         private readonly string $rootDir,
     ) {
     }
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if ($this->adminToken === '') {
+        if (!$this->verifier->canAuthenticate()) {
             return $response->withStatus(404);
         }
 
-        $supplied = $this->extractToken($request);
-        $authed = $supplied !== null && hash_equals($this->adminToken, $supplied);
-
-        if (!$authed) {
+        if (!$this->verifier->isAdmin($request)) {
             $response->getBody()->write($this->loginPage());
             return $response->withStatus(401)->withHeader('Content-Type', 'text/html; charset=utf-8');
         }
 
-        // Authed via the URL token → persist as a cookie and clean the URL.
-        if (($request->getQueryParams()['token'] ?? null) !== null) {
+        // Authed via a valid URL token → persist as a cookie and clean the URL.
+        $legacy = $this->verifier->legacyToken($request);
+        if (($request->getQueryParams()['token'] ?? null) !== null && $this->verifier->tokenMatches($legacy)) {
             return $response
                 ->withStatus(303)
                 ->withHeader('Location', '/wiki')
                 ->withHeader(
                     'Set-Cookie',
-                    'tds_wiki=' . rawurlencode($supplied) . '; Path=/wiki; HttpOnly; SameSite=Lax; Max-Age=86400',
+                    'tds_wiki=' . rawurlencode((string) $legacy) . '; Path=/wiki; HttpOnly; SameSite=Lax; Max-Age=86400',
                 );
         }
 
@@ -63,20 +64,6 @@ final class WikiAction
             ->withHeader('Content-Type', 'text/html; charset=utf-8')
             ->withHeader('Cache-Control', 'no-store')
             ->withHeader('X-Robots-Tag', 'noindex');
-    }
-
-    private function extractToken(Request $request): ?string
-    {
-        $auth = $request->getHeaderLine('Authorization');
-        if ($auth !== '' && preg_match('/^Bearer\s+(.+)$/i', $auth, $m) === 1) {
-            return $m[1];
-        }
-        $q = $request->getQueryParams()['token'] ?? null;
-        if (is_string($q) && $q !== '') {
-            return $q;
-        }
-        $cookie = $request->getCookieParams()['tds_wiki'] ?? null;
-        return is_string($cookie) && $cookie !== '' ? rawurldecode($cookie) : null;
     }
 
     /** Read the generated wiki HTML from the dev or bundle layout. */

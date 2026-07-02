@@ -12,6 +12,9 @@ declare(strict_types=1);
  *   API-WIKI.md      a Markdown reference (one section per service)
  *   wiki/index.html  a self-contained, styled HTML wiki (design-system
  *                    type + colours)
+ *   wiki/data.json   the same route map as structured JSON, consumed by the
+ *                    in-panel admin wiki (tds-admin) via the gateway's
+ *                    gated /wiki.json endpoint
  *
  * Because it reads the routes themselves, **new routes appear in the
  * wiki automatically** — wire it into CI (see .github/workflows/build.yml)
@@ -391,4 +394,33 @@ HTML;
 @mkdir($outDir . '/wiki', 0775, true);
 file_put_contents($outDir . '/wiki/index.html', $html);
 
-echo "[gen-api-wiki] wrote {$outDir}/API-WIKI.md and {$outDir}/wiki/index.html ({$totalRoutes} routes across " . count($collected) . " services).\n";
+// ---- JSON ------------------------------------------------------------------
+// Structured route map for the in-panel admin wiki (tds-admin). Served gated
+// by the gateway's /wiki.json endpoint; the same $collected data as the HTML.
+$servicesJson = [];
+foreach ($SERVICES as $key => $svc) {
+    if (!isset($collected[$key])) {
+        continue;
+    }
+    $servicesJson[] = [
+        'key' => $key,
+        'label' => $svc['label'],
+        'prefix' => $svc['prefix'],
+        'blurb' => $svc['blurb'],
+        'source' => $sources[$key],
+        'routes' => array_map(static fn (array $r): array => [
+            'methods' => $r['methods'],
+            'path' => $r['path'] === '' ? '/' : $r['path'],
+            'auth' => $r['auth'],
+            'handler' => $r['handler'],
+        ], $collected[$key]),
+    ];
+}
+file_put_contents($outDir . '/wiki/data.json', json_encode([
+    'generatedAt' => $generatedAt,
+    'baseUrl' => 'https://api.tracht-digital.de',
+    'totalRoutes' => $totalRoutes,
+    'services' => $servicesJson,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+
+echo "[gen-api-wiki] wrote {$outDir}/API-WIKI.md, {$outDir}/wiki/index.html and {$outDir}/wiki/data.json ({$totalRoutes} routes across " . count($collected) . " services).\n";

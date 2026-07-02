@@ -4,17 +4,17 @@
 > Slim-Routendefinitionen der Services. Nicht von Hand bearbeiten — neue
 > Routen erscheinen beim nächsten Build automatisch.
 
-Öffentliche Basis-URL: `https://api.tracht-digital.de` · Stand: 2026-06-23 10:10 UTC · 58 Routen
+Öffentliche Basis-URL: `https://api.tracht-digital.de` · Stand: 2026-07-02 17:11 UTC · 73 Routen
 
 Auth-Spalte: **öffentlich** (kein Gate) · **Admin-Token** (Bearer `ADMIN_TOKEN`) · **JWT** (Customer-Cookie/Bearer, JWKS-verifiziert) · **Customer-JWT** (Login-Session).
 
 ## Inhalt
 
-- [API-Gateway](#api-gateway) — 3 Routen
-- [Auth-API](#auth-api) — 10 Routen
+- [API-Gateway](#api-gateway) — 4 Routen
+- [Auth-API](#auth-api) — 18 Routen
 - [Contact-API](#contact-api) — 2 Routen
-- [Content-API](#content-api) — 15 Routen
-- [Customer-API](#customer-api) — 28 Routen
+- [Content-API](#content-api) — 20 Routen
+- [Customer-API](#customer-api) — 29 Routen
 
 ## API-Gateway
 
@@ -25,8 +25,9 @@ _Quelle: `src/Bootstrap.php`_
 | Methode | Pfad | Auth | Handler |
 |---|---|---|---|
 | `GET` | `/` | öffentlich | `IndexAction` |
-| `GET` | `/healthz` | öffentlich | `HealthAction` |
 | `GET` | `/wiki` | öffentlich | `WikiAction` |
+| `GET` | `/wiki.json` | öffentlich | `WikiDataAction` |
+| `OPTIONS` | `/wiki.json` | öffentlich | `WikiDataAction` |
 
 > Alle übrigen Pfade werden anhand des ersten Segments an den passenden
 > Backend-Service weitergeleitet (`/auth/*`, `/content/*`, `/customer/*`,
@@ -41,13 +42,21 @@ _Quelle: `../tds-auth-api/src/Bootstrap.php`_
 | Methode | Pfad | Auth | Handler |
 |---|---|---|---|
 | `GET` | `/auth/healthz` | öffentlich | `HealthAction` |
-| `POST` | `/auth/admin/login` | öffentlich | `AdminLoginAction` |
+| `POST` | `/auth/login` | öffentlich | `LoginAction` |
+| `POST` | `/auth/customer/login` | öffentlich | `LoginAction` |
+| `DELETE` | `/auth/logout` | öffentlich | `AdminLogoutAction` |
 | `DELETE` | `/auth/admin/login` | öffentlich | `AdminLogoutAction` |
-| `POST` | `/auth/admin/customer-credentials` | Admin-Token | `CreateCustomerCredentialAction` |
+| `GET` | `/auth/me` | öffentlich | `MeAction` |
+| `PUT` | `/auth/password` | öffentlich | `ChangePasswordAction` |
+| `PUT` | `/auth/customer/password` | öffentlich | `ChangePasswordAction` |
+| `GET` | `/auth/admin/users` | Admin-Token | `ListUsersAction` |
+| `POST` | `/auth/admin/users` | Admin-Token | `CreateUserAction` |
+| `PATCH` | `/auth/admin/users/{id}` | Admin-Token | `UpdateUserAction` |
+| `DELETE` | `/auth/admin/users/{id}` | Admin-Token | `DeleteUserAction` |
+| `POST` | `/auth/admin/users/{id}/reset-password` | Admin-Token | `ResetPasswordAction` |
 | `GET` | `/auth/admin/sessions` | Admin-Token | `ListSessionsAction` |
 | `DELETE` | `/auth/admin/sessions/{jti}` | Admin-Token | `RevokeSessionAction` |
-| `POST` | `/auth/customer/login` | öffentlich | `CustomerLoginAction` |
-| `PUT` | `/auth/customer/password` | Customer-JWT | `CustomerChangePasswordAction` |
+| `POST` | `/auth/admin/customer-credentials` | öffentlich | `CreateCustomerCredentialAction` |
 | `POST` | `/auth/refresh` | öffentlich | `RefreshAction` |
 | `GET` | `/auth/.well-known/jwks.json` | öffentlich | `JwksAction` |
 
@@ -72,7 +81,9 @@ _Quelle: `../tds-content-api/src/Bootstrap.php`_
 |---|---|---|---|
 | `GET` | `/content/healthz` | öffentlich | `HealthAction` |
 | `GET` | `/content/blog` | öffentlich | `ListAction` |
+| `GET` | `/content/blog/popular` | öffentlich | `PopularAction` |
 | `GET` | `/content/blog/{slug}` | öffentlich | `GetAction` |
+| `POST` | `/content/blog/{slug}/view` | öffentlich | `IncrementViewAction` |
 | `POST` | `/content/blog` | Admin-Token | `CreateAction` |
 | `PUT` | `/content/blog/{slug}` | Admin-Token | `UpdateAction` |
 | `DELETE` | `/content/blog/{slug}` | Admin-Token | `DeleteAction` |
@@ -82,6 +93,9 @@ _Quelle: `../tds-content-api/src/Bootstrap.php`_
 | `GET` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingGetAction` |
 | `PUT` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingPutAction` |
 | `DELETE` | `/content/landing/{key:[a-z0-9-]+}` | Admin-Token | `LandingDeleteAction` |
+| `GET` | `/content/topics` | öffentlich | `TopicsListAction` |
+| `PUT` | `/content/topics` | Admin-Token | `TopicsPutAction` |
+| `DELETE` | `/content/topics` | Admin-Token | `TopicsDeleteAction` |
 | `GET` | `/content/admin/deployments` | Admin-Token | `ListDeploymentsAction` |
 | `POST` | `/content/admin/deployments/{name}/update` | Admin-Token | `TriggerDeploymentAction` |
 | `GET` | `/content/uploads/{slug:[a-z0-9-]+}/{filename:[a-zA-Z0-9._-]+}` | öffentlich | `UploadServeAction` |
@@ -98,6 +112,7 @@ _Quelle: `../tds-customer-api/src/Bootstrap.php`_
 | `POST` | `/customer/stripe/webhook` | öffentlich | `WebhookAction` |
 | `GET` | `/customer/documents/sign` | öffentlich | `SignedDownloadAction` |
 | `POST` | `/customer/admin/customers` | Admin-Token | `CreateCustomerAction` |
+| `GET` | `/customer/admin/customers` | Admin-Token | `AdminListCustomersAction` |
 | `GET` | `/customer/admin/projects` | Admin-Token | `AdminListProjectsAction` |
 | `GET` | `/customer/admin/time-entries` | Admin-Token | `AdminTimeEntryListAction` |
 | `POST` | `/customer/admin/time-entries` | Admin-Token | `AdminTimeEntryCreateAction` |

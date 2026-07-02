@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 use Tds\ApiGateway\Action\WikiAction;
+use Tds\ApiGateway\Support\AdminSessionVerifier;
 
 final class WikiActionTest extends TestCase
 {
@@ -26,6 +27,21 @@ final class WikiActionTest extends TestCase
         @rmdir($this->dir);
     }
 
+    /**
+     * Build a WikiAction. `adminToken` gates the legacy path; `me` (when set)
+     * is the stubbed auth-api /me body used to verify a session cookie without
+     * touching the network.
+     */
+    private function action(string $adminToken, ?array $me = null): WikiAction
+    {
+        $verifier = new AdminSessionVerifier(
+            $adminToken,
+            $me === null ? '' : 'https://auth.example/auth',
+            fn (string $cookie): ?array => $me,
+        );
+        return new WikiAction($verifier, $this->dir);
+    }
+
     private function get(WikiAction $action, array $opts = []): Response
     {
         $req = (new ServerRequestFactory())->createServerRequest('GET', 'https://api.tracht-digital.de/wiki');
@@ -43,15 +59,15 @@ final class WikiActionTest extends TestCase
         return $res;
     }
 
-    public function testDisabledWhenNoAdminTokenConfigured(): void
+    public function testDisabledWhenNoCredentialConfigured(): void
     {
-        $res = $this->get(new WikiAction('', $this->dir));
+        $res = $this->get($this->action(''));
         self::assertSame(404, $res->getStatusCode());
     }
 
     public function testShowsLoginFormWithoutToken(): void
     {
-        $res = $this->get(new WikiAction('secret', $this->dir));
+        $res = $this->get($this->action('secret'));
         self::assertSame(401, $res->getStatusCode());
         self::assertStringContainsString('Anmelden', (string) $res->getBody());
         self::assertStringNotContainsString('WIKI-OK', (string) $res->getBody());
@@ -59,27 +75,47 @@ final class WikiActionTest extends TestCase
 
     public function testRejectsWrongToken(): void
     {
-        $res = $this->get(new WikiAction('secret', $this->dir), ['bearer' => 'nope']);
+        $res = $this->get($this->action('secret'), ['bearer' => 'nope']);
         self::assertSame(401, $res->getStatusCode());
     }
 
     public function testServesWikiWithBearerToken(): void
     {
-        $res = $this->get(new WikiAction('secret', $this->dir), ['bearer' => 'secret']);
+        $res = $this->get($this->action('secret'), ['bearer' => 'secret']);
         self::assertSame(200, $res->getStatusCode());
         self::assertStringContainsString('WIKI-OK', (string) $res->getBody());
     }
 
-    public function testServesWikiWithCookie(): void
+    public function testServesWikiWithLegacyCookie(): void
     {
-        $res = $this->get(new WikiAction('secret', $this->dir), ['cookie' => ['tds_wiki' => 'secret']]);
+        $res = $this->get($this->action('secret'), ['cookie' => ['tds_wiki' => 'secret']]);
         self::assertSame(200, $res->getStatusCode());
         self::assertStringContainsString('WIKI-OK', (string) $res->getBody());
+    }
+
+    public function testServesWikiWithAdminSessionCookie(): void
+    {
+        // No ADMIN_TOKEN; auth is the tds_session cookie verified via /me.
+        $res = $this->get(
+            $this->action('', ['isAdmin' => true]),
+            ['cookie' => ['tds_session' => 'jwt-value']],
+        );
+        self::assertSame(200, $res->getStatusCode());
+        self::assertStringContainsString('WIKI-OK', (string) $res->getBody());
+    }
+
+    public function testRejectsNonAdminSessionCookie(): void
+    {
+        $res = $this->get(
+            $this->action('', ['isAdmin' => false]),
+            ['cookie' => ['tds_session' => 'jwt-value']],
+        );
+        self::assertSame(401, $res->getStatusCode());
     }
 
     public function testQueryTokenSetsCookieAndRedirects(): void
     {
-        $res = $this->get(new WikiAction('secret', $this->dir), ['query' => ['token' => 'secret']]);
+        $res = $this->get($this->action('secret'), ['query' => ['token' => 'secret']]);
         self::assertSame(303, $res->getStatusCode());
         self::assertSame('/wiki', $res->getHeaderLine('Location'));
         self::assertStringContainsString('tds_wiki=', $res->getHeaderLine('Set-Cookie'));
@@ -91,7 +127,7 @@ final class WikiActionTest extends TestCase
         @unlink($this->dir . '/wiki/index.html');
         @rmdir($this->dir . '/wiki');
 
-        $res = $this->get(new WikiAction('secret', $this->dir), ['bearer' => 'secret']);
+        $res = $this->get($this->action('secret'), ['bearer' => 'secret']);
         self::assertSame(503, $res->getStatusCode());
         self::assertStringContainsString('bin/gen-api-wiki.php', (string) $res->getBody());
     }

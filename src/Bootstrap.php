@@ -13,9 +13,11 @@ use Tds\ApiGateway\Action\IndexAction;
 use Tds\ApiGateway\Action\InProcessHealthAction;
 use Tds\ApiGateway\Action\ProxyAction;
 use Tds\ApiGateway\Action\WikiAction;
+use Tds\ApiGateway\Action\WikiDataAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
 use Tds\ApiGateway\Http\CurlProxyClient;
+use Tds\ApiGateway\Support\AdminSessionVerifier;
 use Tds\ApiGateway\Support\Logger;
 use Tds\ApiGateway\Support\MigrationRunner;
 
@@ -58,11 +60,25 @@ final class Bootstrap
             $c->get(ServiceRegistry::class),
         ));
 
-        // Internal API wiki, gated by the shared ADMIN_TOKEN (disabled when
-        // unset). Serves the generated wiki/index.html from the bundle.
-        $container->set(WikiAction::class, static fn () => new WikiAction(
+        // Internal API wiki. Gated by the shared ADMIN_TOKEN (broken-glass /
+        // standalone login) OR a valid admin `tds_session` cookie verified via
+        // auth-api /me — the path the cookie-based admin panel uses. Disabled
+        // (404) only when neither credential path is configured.
+        $container->set(AdminSessionVerifier::class, static fn () => new AdminSessionVerifier(
             $env('ADMIN_TOKEN', ''),
+            $env('AUTH_API_URL', ''),
+        ));
+        // HTML wiki, opened directly in the browser (same-origin, no CORS).
+        $container->set(WikiAction::class, static fn (Container $c) => new WikiAction(
+            $c->get(AdminSessionVerifier::class),
             $rootDir,
+        ));
+        // JSON route map, fetched cross-origin by the admin panel → needs CORS
+        // for the configured origins (gateway-owned route, no upstream to dup).
+        $container->set(WikiDataAction::class, static fn (Container $c) => new WikiDataAction(
+            $c->get(AdminSessionVerifier::class),
+            $rootDir,
+            array_values(array_filter(array_map('trim', explode(',', $env('CORS_ALLOWED_ORIGINS', ''))))),
         ));
 
         if ($inProcess) {
@@ -133,8 +149,11 @@ final class Bootstrap
 
         $app->get('/', IndexAction::class);
         $app->get('/healthz', $healthAction);
-        // Internal, login-gated API wiki (not proxied/dispatched).
+        // Internal, login-gated API wiki (not proxied/dispatched). HTML for
+        // direct viewing; JSON for the in-panel admin wiki (+ CORS preflight).
         $app->get('/wiki', WikiAction::class);
+        $app->get('/wiki.json', WikiDataAction::class);
+        $app->options('/wiki.json', WikiDataAction::class);
         // Everything else goes to the active backend (in-process dispatch or
         // HTTP proxy). FastRoute prefers the static routes above over this
         // variable catch-all.
