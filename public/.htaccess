@@ -1,9 +1,25 @@
+# Pass the Authorization header through to PHP. Apache/CGI/PHP-FPM strips
+# `Authorization` by default, so Bearer-token auth (the admin panel sends its
+# JWT as `Authorization: Bearer …`) never reached the backends and 401'd with
+# "No token presented" — only the tds_session cookie path worked. CGIPassAuth
+# (Apache 2.4.13+) is the clean fix; the RewriteRule below is the fallback for
+# older Apache / setups where CGIPassAuth isn't honoured.
+<IfModule mod_setenvif.c>
+    SetEnvIfNoCase ^Authorization$ "(.+)" HTTP_AUTHORIZATION=$1
+</IfModule>
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
     RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Apache 2.4.13+ under PHP-FPM: hand the Authorization header to the FPM worker.
+<IfModule mod_proxy_fcgi.c>
+    CGIPassAuth On
 </IfModule>
 
 Options -Indexes
