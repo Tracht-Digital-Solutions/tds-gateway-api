@@ -7,6 +7,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
+use Tds\ApiGateway\Support\HealthBody;
 use Tds\ApiGateway\Support\Logger;
 
 /**
@@ -39,16 +40,24 @@ final class InProcessHealthAction
                     ->withUri($request->getUri()->withQuery(''));
                 $result = $this->dispatcher->dispatch($probe, $service->prefix, '/healthz');
                 $status = $result->getStatusCode();
+                $db = HealthBody::dbState((string) $result->getBody());
             } catch (\Throwable) {
                 // status 0 = the service couldn't be booted/dispatched at all.
                 $status = 0;
+                $db = null;
             }
 
-            $ok = $status >= 200 && $status < 300;
+            // Gate on the self-reported db state too: each backend /healthz
+            // answers 200 by contract, so a reachable-but-un-migrated service
+            // would look green without inspecting `db` (tds-api-gateway#4).
+            $ok = $status >= 200 && $status < 300 && $db !== 'down' && $db !== 'no-schema';
             $services[$key] = ['ok' => $ok, 'status' => $status];
+            if ($db !== null) {
+                $services[$key]['db'] = $db;
+            }
             $allOk = $allOk && $ok;
             if (!$ok) {
-                $down[$key] = $status;
+                $down[$key] = $db !== null && $db !== 'ok' ? "db:{$db}" : $status;
             }
         }
 

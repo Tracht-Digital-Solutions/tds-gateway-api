@@ -7,6 +7,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Http\ProxyClientInterface;
+use Tds\ApiGateway\Support\HealthBody;
 use Tds\ApiGateway\Support\Logger;
 
 /**
@@ -43,13 +44,23 @@ final class HealthAction
         $allOk = true;
         $down = [];
         foreach (array_keys($requests) as $key) {
-            $status = isset($results[$key]) ? $results[$key]->status : 0;
-            $ok = $status >= 200 && $status < 300;
+            $result = $results[$key] ?? null;
+            $status = $result !== null ? $result->status : 0;
+            $db = HealthBody::dbState($result !== null ? $result->body : '');
+            // A service is healthy only if it answered 2xx AND its own db probe
+            // isn't reporting trouble. Each upstream /healthz always returns 200
+            // (never-5xx contract), so without inspecting `db` a reachable-but-
+            // un-migrated backend would show green here while every real request
+            // 500s (tds-api-gateway#4).
+            $ok = $status >= 200 && $status < 300 && $db !== 'down' && $db !== 'no-schema';
             $services[$key] = ['ok' => $ok, 'status' => $status];
+            if ($db !== null) {
+                $services[$key]['db'] = $db;
+            }
             $allOk = $allOk && $ok;
             if (!$ok) {
                 // status 0 = transport failure (connect refused / DNS / timeout).
-                $down[$key] = $status;
+                $down[$key] = $db !== null && $db !== 'ok' ? "db:{$db}" : $status;
             }
         }
 

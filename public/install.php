@@ -59,6 +59,26 @@ function migrations_available(): bool
     return !in_array('proc_open', $disabled, true);
 }
 
+/**
+ * Resolve a CLI php binary. Under PHP-FPM, PHP_BINARY is the FPM binary, which
+ * cannot run phinx — a prime suspect for "installer said OK but the DB is empty".
+ * Prefer an explicit override, then the CLI next to the running binary, then a
+ * clearly-CLI PHP_BINARY, then PATH. Mirrors MigrationRunner::phpCliBinary().
+ */
+function php_cli_binary(): string
+{
+    $override = getenv('GATEWAY_PHP_BINARY');
+    if (is_string($override) && $override !== '') return $override;
+    if (defined('PHP_BINDIR') && PHP_BINDIR !== '') {
+        $candidate = PHP_BINDIR . '/php' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+        if (is_file($candidate)) return $candidate;
+    }
+    if (defined('PHP_BINARY') && PHP_BINARY !== '' && !str_contains(strtolower(PHP_BINARY), 'fpm')) {
+        return PHP_BINARY;
+    }
+    return 'php';
+}
+
 /** Build a services/<name>/.env file body from the collected config. */
 function env_for(string $name, array $c): string
 {
@@ -163,7 +183,7 @@ function run_migration(string $serviceDir, int $timeout = 120): array
         return [false, 'proc_open ist deaktiviert — Migration bitte manuell ausführen (siehe unten).'];
     }
     $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $cmd = [PHP_BINARY, 'vendor/bin/phinx', 'migrate', '-e', 'production'];
+    $cmd = [php_cli_binary(), 'vendor/bin/phinx', 'migrate', '-e', 'production'];
     $proc = @proc_open($cmd, $descriptors, $pipes, $serviceDir);
     if (!is_resource($proc)) {
         return [false, 'Konnte den Migrationsprozess nicht starten.'];

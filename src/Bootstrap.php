@@ -17,6 +17,7 @@ use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
 use Tds\ApiGateway\Http\CurlProxyClient;
 use Tds\ApiGateway\Support\Logger;
+use Tds\ApiGateway\Support\MigrationRunner;
 
 final class Bootstrap
 {
@@ -144,6 +145,35 @@ final class Bootstrap
         );
 
         return $app;
+    }
+
+    /**
+     * Best-effort auto-migration, called from the entry point (public/index.php)
+     * — NOT from createApp(), so unit tests that build the app never shell out.
+     *
+     * Only runs in the default in-process mode (proxy mode's services own their
+     * own migrations) and can be disabled with GATEWAY_AUTO_MIGRATE=0. Guarded
+     * so it applies pending migrations at most once per deployed migration-set;
+     * see {@see MigrationRunner}. Assumes createApp() already loaded the .env.
+     */
+    public static function autoMigrate(string $rootDir): void
+    {
+        $env = static fn (string $key, ?string $default = null): string => self::env($key, $default);
+
+        $inProcess = strtolower(trim($env('GATEWAY_MODE', 'inprocess'))) !== 'proxy';
+        if (!$inProcess || $env('GATEWAY_AUTO_MIGRATE', '1') === '0') {
+            return;
+        }
+
+        $servicesDir = rtrim($env('GATEWAY_SERVICES_DIR', \dirname($rootDir) . '/services'), '/\\');
+
+        $runner = new MigrationRunner(
+            servicesDir: $servicesDir,
+            serviceNames: array_keys(self::SERVICE_BOOTSTRAPS),
+            stateDir: $rootDir . '/var',
+            logger: Logger::fromEnv($env, $rootDir),
+        );
+        $runner->ensureMigrated();
     }
 
     /**

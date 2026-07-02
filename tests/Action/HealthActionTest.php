@@ -53,6 +53,28 @@ final class HealthActionTest extends TestCase
         self::assertTrue($body['services']['/auth']['ok']);
     }
 
+    public function testReachableButUnmigratedUpstreamCountsAsDown(): void
+    {
+        // Every upstream answers 200 (never-5xx health contract), but content
+        // reports its schema is missing. The aggregate must still go 503.
+        $client = new FakeProxyClient(new ProxyResponse(200, [], '{"status":"ok","db":"ok"}'));
+        $client->whenUrlContains(':8001', new ProxyResponse(200, [], '{"status":"ok","db":"no-schema"}'));
+        $action = new HealthAction($this->registry(), $client);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/healthz');
+        $response = $action($request, new Response());
+
+        self::assertSame(503, $response->getStatusCode());
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertFalse($body['ok']);
+        self::assertFalse($body['services']['/content']['ok']);
+        self::assertSame('no-schema', $body['services']['/content']['db']);
+        // A 200 + db:ok upstream stays healthy.
+        self::assertTrue($body['services']['/auth']['ok']);
+        self::assertSame('ok', $body['services']['/auth']['db']);
+    }
+
     public function testTransportFailureCountsAsDownAndPingsEveryUpstream(): void
     {
         $client = new FakeProxyClient(new ProxyResponse(200, [], 'ok'));
