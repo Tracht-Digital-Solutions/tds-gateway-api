@@ -249,7 +249,16 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   `createApp()` (never *from* createApp — keeps the app pure for unit tests).
   In-process mode only (`GATEWAY_MODE=proxy` services own their migrations);
   toggle with `GATEWAY_AUTO_MIGRATE=0`. On the first request after a deploy it
-  runs `phinx migrate -e production` in each `services/<name>` and marks done.
+  applies each `services/<name>`'s pending migrations, then marks done.
+- **Migrations run *in-process* via Phinx's `Manager` API — not a subprocess.**
+  Shared Plesk hosting routinely disables `proc_open`, which is exactly why the
+  installer's shell-out to phinx silently applied nothing and left prod empty.
+  In-process needs no `proc_open` and no CLI php. `MigrationRunner` `require`s
+  the service's own `vendor/autoload.php` (each ships Phinx post `--no-dev`),
+  reads DB creds straight from that service's `.env` (never the process env, so
+  a warm FPM worker can't leak another service's `DB_NAME`), and builds a Phinx
+  `Config` mirroring the service's phinx.php (`phinx_migration` table, mysql,
+  utf8mb4). The old `proc_open` shell-out remains only as a fallback.
 - **Guards (all in `MigrationRunner`):** a marker file under `<root>/var/`
   (gitignored → survives `git pull`, never committed) keyed to a **signature of
   the migration filenames** — hot path is a single `is_file()`; the marker name
@@ -257,11 +266,13 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   is wanted. An exclusive non-blocking `flock` makes it single-flight (only the
   first worker migrates; others skip). Failures are logged and swallowed (never
   fatal) and do **not** write the marker, so they retry next request.
-- **CLI-php resolution:** under PHP-FPM `PHP_BINARY` is the FPM binary and can't
-  run phinx (a prime suspect for "installer said OK but the DB is empty").
-  `MigrationRunner::phpCliBinary()` prefers `GATEWAY_PHP_BINARY`, then a `php`
-  next to `PHP_BINDIR`, then a non-fpm `PHP_BINARY`, then PATH. `install.php`'s
-  `php_cli_binary()` mirrors this (it has no autoloader, so it's duplicated).
+- **CLI-php resolution (subprocess fallback + install.php only):** under PHP-FPM
+  `PHP_BINARY` is the FPM binary and can't run phinx (a prime suspect for
+  "installer said OK but the DB is empty"). `MigrationRunner::phpCliBinary()`
+  prefers `GATEWAY_PHP_BINARY`, then a `php` next to `PHP_BINDIR`, then a non-fpm
+  `PHP_BINARY`, then PATH. `install.php`'s `php_cli_binary()` mirrors this (it
+  has no autoloader, so it's duplicated). The runtime auto-migrator prefers the
+  in-process path and only reaches this when Phinx can't be loaded in-process.
 - **Health interplay:** each backend `/healthz` now reports `db: ok|no-schema|
   down` and the gateway's aggregate (`HealthAction` / `InProcessHealthAction` via
   `Support\HealthBody`) flips to **503** when any service is reachable-but-un-
