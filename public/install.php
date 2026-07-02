@@ -52,6 +52,28 @@ function set_cfg(array $kv): void { $_SESSION['tds_install'] = array_merge($_SES
 function dsn_server(string $host, string $port): string { return "mysql:host={$host};port={$port};charset=utf8mb4"; }
 function dsn_db(string $host, string $port, string $db): string { return "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4"; }
 
+/**
+ * Drop every table in the connected database (FK-safe). Used by the optional
+ * "reset" during a fresh install to clear a *botched partial migration* — e.g.
+ * a migration that failed after CREATE TABLE leaves an unlogged table that then
+ * trips "1050 … already exists" on the next run. Destructive: only invoked when
+ * the operator explicitly ticks the reset box (and there's no real data yet at
+ * install time).
+ */
+function drop_all_tables(PDO $pdo): int
+{
+    $tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+    if (!$tables) {
+        return 0;
+    }
+    $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+    foreach ($tables as $t) {
+        $pdo->exec('DROP TABLE IF EXISTS `' . str_replace('`', '', (string) $t) . '`');
+    }
+    $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+    return count($tables);
+}
+
 function migrations_available(): bool
 {
     if (!function_exists('proc_open')) return false;
@@ -391,11 +413,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
                         . "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
                 }
             }
+            $reset = post('reset_dbs') === '1';
             foreach ($dbs as $db) {
-                new PDO(dsn_db($c['db_host'], $c['db_port'], $db), $c['db_user'], $c['db_pass'], [
+                $conn = new PDO(dsn_db($c['db_host'], $c['db_port'], $db), $c['db_user'], $c['db_pass'], [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_TIMEOUT => 5,
                 ]);
+                // Optional clean slate: wipe leftover tables so a botched partial
+                // migration (unlogged tables → "1050 already exists") re-migrates
+                // cleanly. Only when explicitly requested; safe at install time.
+                if ($reset) {
+                    drop_all_tables($conn);
+                }
             }
             $step = 3; // success → secrets
         } catch (Throwable $e) {
@@ -633,6 +662,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
           <div><label>Customer</label><input type="text" name="db_customer" value="<?= h(cfg('db_customer', 'tds_customer')) ?>" /></div>
         </div>
         <label class="cb"><input type="checkbox" name="create_dbs" value="1" checked /> Fehlende Datenbanken anlegen (Benutzer braucht das <code>CREATE</code>-Recht)</label>
+        <label class="cb"><input type="checkbox" name="reset_dbs" value="1" /> <strong>Vorhandene Tabellen zuerst löschen</strong> (Neuinstallation / Reparatur eines abgebrochenen Migrationslaufs) — <span style="color:var(--err)">löscht alle Tabellen in den vier Datenbanken</span></label>
       </fieldset>
       <button class="btn" type="submit">Verbindung testen &amp; weiter →</button>
     </form>

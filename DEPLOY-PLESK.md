@@ -277,8 +277,11 @@ Bundle gebaut wurde.
   sofort, Phinx protokolliert aber erst nach vollständigem Erfolg), sodass eine
   Tabelle ohne `phinx_migration`-Eintrag zurückbleibt und der nächste Lauf sie
   erneut anlegen will. Da die betroffene DB in diesem Zustand **noch keine echten
-  Daten** hält: die DB **droppen und leer neu anlegen**, dann erneut migrieren
-  (erster Request / 4.4). Ursache war meist ein DB-Server, der strenger ist als
+  Daten** hält, am einfachsten im Web-Installer (`/install.php`, Schritt
+  *Datenbank*) die Option **"Vorhandene Tabellen zuerst löschen"** anhaken — das
+  räumt die Reste weg, danach migriert der nächste Lauf sauber. Ohne Installer:
+  die DB **droppen und leer neu anlegen**, dann erneut migrieren (erster Request
+  / 4.4). Ursache war meist ein DB-Server, der strenger ist als
   der Entwicklungs-MariaDB (z. B. **MySQL 8**: lehnt nullbare PRIMARY KEYs (1171)
   und signed→unsigned-Foreign-Keys (3780) ab). Diese Migrationen sind ab
   auth v0.2.1 / customer v0.2.1 MySQL-8-fest — nach dem Redeploy laufen sie auf
