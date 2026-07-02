@@ -272,6 +272,17 @@ Bundle gebaut wurde.
   `auto-migrate … failed`/`skipped` sehen. Häufig: `gateway/var/` nicht
   beschreibbar (fällt auf das System-Temp zurück), oder ein `.env` mit falschen
   DB-Zugängen. Notfalls die Migrations-Schleife aus 4.4 (Fallback) laufen lassen.
+- **Migration bricht ab mit `1050 … already exists` (z. B. `project`)** → eine
+  frühere Migration ist *nach* dem `CREATE TABLE` gescheitert (MySQL committet DDL
+  sofort, Phinx protokolliert aber erst nach vollständigem Erfolg), sodass eine
+  Tabelle ohne `phinx_migration`-Eintrag zurückbleibt und der nächste Lauf sie
+  erneut anlegen will. Da die betroffene DB in diesem Zustand **noch keine echten
+  Daten** hält: die DB **droppen und leer neu anlegen**, dann erneut migrieren
+  (erster Request / 4.4). Ursache war meist ein DB-Server, der strenger ist als
+  der Entwicklungs-MariaDB (z. B. **MySQL 8**: lehnt nullbare PRIMARY KEYs (1171)
+  und signed→unsigned-Foreign-Keys (3780) ab). Diese Migrationen sind ab
+  auth v0.2.1 / customer v0.2.1 MySQL-8-fest — nach dem Redeploy laufen sie auf
+  einer leeren DB sauber durch.
 - **Frontend-CI grün, aber Site nicht aktualisiert** → Webhook-Secret fehlt/falsch;
   die CI wertet das nur als gelbe Warnung, nie als roten Build
   (Annotations des Runs prüfen). Zeigt die Warnung **HTTP 404**, obwohl Host/Port
