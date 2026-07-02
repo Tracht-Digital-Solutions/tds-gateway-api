@@ -193,6 +193,24 @@ done
    Bequemer: das mitgelieferte `gateway/bin/migrate-stack.sh` macht genau diese
    Schleife — `PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/migrate-stack.sh`.
 
+### 4.4a Setup-Admin (erster Login)
+
+Die Auth-Migration legt **einen** Bootstrap-Admin an, damit der Stack ohne SSH
+benutzbar ist — und erzwingt sofort ein sicheres Passwort:
+
+- **Standard:** `admin@tracht-digital.de` / `tds-setup-admin`. Die Zeile trägt
+  `must_change_password`, das Default-Passwort ist also bis zur eigenen Wahl
+  wertlos. **Vor dem ersten Migrate** in `services/auth/.env`
+  `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` setzen, damit der
+  öffentliche Default gar nicht erst entsteht.
+- **Sichern:** im Admin-Panel als Setup-Admin einloggen und den erzwungenen
+  Passwortwechsel abschließen (bzw. `POST /auth/login` → `PUT /auth/password`
+  `{old,new}`, neu ≥ 12 Zeichen). Danach **`gateway/public/install.php`
+  löschen**.
+- **Weitere/verlorene Admins:** im gepullten Bundle
+  `cd services/auth && /opt/plesk/php/8.3/bin/php bin/create-admin.php <email> [passwort]`.
+- Details: `tds-auth-api` → `INSTALL.md` §5 / `RUNBOOK.md`.
+
 ### 4.5 Deploy-Aktionen + Webhook
 
 Im In-Process-Modus sind **keine Prozess-Neustarts** und **kein manueller
@@ -249,6 +267,9 @@ Bundle gebaut wurde.
    Webhook-Secret setzen, `/healthz` grün. **Migrationen laufen automatisch beim
    ersten Request** (kein manueller Schritt) und **keine Service-Prozesse zu
    starten** (In-Process-Modus).
+4a. ☐ **Setup-Admin sichern** (4.4a): als `admin@tracht-digital.de` einloggen,
+   erzwungenen Passwortwechsel abschließen — dann `gateway/public/install.php`
+   löschen.
 5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
    Webhook-Secrets in den vier Frontend-Repos setzen.
 6. ☐ **`tds-blog` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
