@@ -13,7 +13,7 @@ use Tds\ApiGateway\Support\AdminSessionVerifier;
  * {@see WikiAction} — legacy ADMIN_TOKEN or an admin `tds_session` cookie via
  * {@see AdminSessionVerifier}.
  *
- * Because the admin panel is a different origin (`admin.tracht-digital.de`)
+ * Because the admin panel is a different origin (`management.tracht-digital.de`)
  * and authenticates with the session cookie, this route emits its own CORS
  * headers for the configured origins. CORS is deliberately kept OFF the
  * proxied catch-all (each upstream owns its CORS); it lives here only because

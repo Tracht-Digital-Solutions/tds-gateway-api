@@ -11,7 +11,7 @@ use Tds\ApiGateway\Support\AdminSessionVerifier;
 
 final class WikiDataActionTest extends TestCase
 {
-    private const ORIGIN = 'https://admin.tracht-digital.de';
+    private const ORIGIN = 'https://management.tracht-digital.de';
 
     private string $dir;
 

@@ -758,7 +758,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
           </div>
         </div>
         <label>CORS-Origins <span class="opt">(kommagetrennt)</span></label>
-        <input type="text" name="cors" value="<?= h(cfg('cors', 'https://tracht-digital.de,https://blog.tracht-digital.de,https://admin.tracht-digital.de,https://management.tracht-digital.de,https://app.tracht-digital.de')) ?>" />
+        <input type="text" name="cors" value="<?= h(cfg('cors', 'https://tracht-digital.de,https://blog.tracht-digital.de,https://management.tracht-digital.de,https://app.tracht-digital.de')) ?>" />
         <div class="row">
           <div><label>Cookie-Domain</label><input type="text" name="cookie_domain" value="<?= h(cfg('cookie_domain', '.tracht-digital.de')) ?>" /></div>
           <div><label>Auth-API-URL</label><input type="text" name="auth_api_url" value="<?= h(cfg('auth_api_url', 'https://api.tracht-digital.de/auth')) ?>" /></div>

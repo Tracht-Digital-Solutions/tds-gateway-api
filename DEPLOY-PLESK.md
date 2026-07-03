@@ -17,7 +17,7 @@ einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 |---|---|---|---|
 | `tracht-digital.de` | `tds-landingpage` | `release` | statisch (HTML/CSS/JS) |
 | `blog.tracht-digital.de` | `tds-blog` | `release` | statisch |
-| `admin.tracht-digital.de` | `tds-admin` | `release` | statisch |
+| `management.tracht-digital.de` | `tds-admin` | `release` | statisch |
 | `app.tracht-digital.de` | `tds-customer` | `release` | statisch |
 | `api.tracht-digital.de` | `tds-api-gateway` | `release` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
 
@@ -59,7 +59,7 @@ Für jede der vier Frontend-(Sub)Domains identisch:
    Git-Webhook beantwortet **nur POST**, ein bloßes GET liefert **404**. Plesk
    pullt dann und die Seite ist live. (Der Token steckt in der URL selbst;
    nirgendwo sonst ablegen.)
-4. `admin.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
+4. `management.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
    zusätzlich abdichten will, legt in Plesk eine IP-Beschränkung oder BasicAuth
    davor (optional).
 
