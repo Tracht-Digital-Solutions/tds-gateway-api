@@ -32,7 +32,7 @@ inside one repo at a time.
 |---|---|---|
 | `tds-auth-api` | `/auth` (port 8003) | RS256 JWT issuance + JWKS; sessions |
 | `tds-contact-api` | `/contact` (port 8002) | Contact form → Resend email + rate limit |
-| `tds-content-api` | `/content` (port 8001) | `blog_post` table (blog CRUD) + `content_block` table (editable landingpage section content, `/landing`) |
+| `tds-content-api` | `/content` (port 8001) | `blog_post` table (blog CRUD) + `content_block` table (editable landingpage section content, `/landing`; also backs the blog's "Aktuelle Themen" via the `topics` key, `/topics`) |
 | `tds-customer-api` | `/customer` (port 8004) | Customers, projects, invoices (Stripe), docs, time tracking |
 
 **API gateway — PHP 8.3 + Slim 4 (transparent reverse proxy):**
@@ -69,9 +69,13 @@ inside one repo at a time.
   (zero PHP hop) instead of running the gateway process.
 - **Auth is centralized in `tds-auth-api`.** It signs RS256 JWTs; every other backend
   verifies them via `/.well-known/jwks.json` and never sees the private key. Cookies are
-  scoped `Domain=.tracht-digital.de` so one session works across `admin.` / `app.`
-  subdomains. The system is mid-migration: admin endpoints still use a shared `ADMIN_TOKEN`
-  (Bearer), with a planned Phase-4 swap to JWKS verification everywhere.
+  scoped `Domain=.tracht-digital.de` so one session works across `management.` / `app.`
+  subdomains. **Phase-4 auth has shipped:** a unified `app_user` table + cookie login issues
+  a per-admin RS256 JWT, and the content/customer admin endpoints verify it via JWKS
+  (`admin=true` + RBAC permissions) — the old shared `ADMIN_TOKEN` Bearer is retired for
+  those. `ADMIN_TOKEN` now only gates the gateway's `/wiki` route and is written by the
+  installer as a shared secret; the first admin login is created at install time (the
+  installer's `create_admin` step).
 - **Frontends are fully static.** No SSR, no Node runtime on the production host. Auth
   gating happens via an inline `<script>` (admin: reads `localStorage` token; customer:
   relies on the httpOnly cookie + a per-page 401-redirect effect), never Astro server
@@ -193,7 +197,7 @@ org-blocked** — deploy/dispatch shell stays inline per repo; the frontend
   (withastro/astro#16542). Don't reintroduce the Vite plugin in any frontend.
 - **lightningcss `cssTarget` lives in the shared `tdsViteBuild` preset.** All four
   frontends spread `tdsViteBuild` (from `@tracht-digital-solutions/tds-shared/astro`,
-  since tds-shared 0.4.0; current 0.4.2) into `vite.build`. It pins the Safari floor so lightningcss
+  since tds-shared 0.4.0; current 0.8.4) into `vite.build`. It pins the Safari floor so lightningcss
   keeps the `-webkit-backdrop-filter` prefix on the frosted `.brand-header`; without it
   the blur silently dies in Safari ≤17 — no error, no test. Don't hand-author the
   `cssTarget` array back into a frontend's `astro.config.mjs` (tds-shared#10).
