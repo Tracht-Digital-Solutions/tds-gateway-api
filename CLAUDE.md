@@ -23,7 +23,7 @@ inside one repo at a time.
 |---|---|---|
 | `tds-landingpage` | `tracht-digital.de` | Public marketing site (DE `/`, EN `/en/`) |
 | `tds-blog` | `blog.tracht-digital.de` | Public blog, SSG; posts fetched at build time |
-| `tds-admin` | `admin.tracht-digital.de` | Internal admin panel (blog editor, time tracker) |
+| `tds-admin` | `management.tracht-digital.de` | Internal admin panel (blog editor, time tracker) |
 | `tds-customer` | `app.tracht-digital.de` | Customer portal (projects, invoices, docs, messages) |
 
 **Backends — PHP 8.3 + Slim 4 + PDO + Phinx, served under `api.tracht-digital.de/*`:**
