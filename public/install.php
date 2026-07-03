@@ -15,8 +15,9 @@ declare(strict_types=1);
  *   3. Secrets — shared admin token, document-sign secret, CORS, plus the
  *      optional third-party keys (Resend, Stripe, GitHub).
  *   4. Install — writes each services/<name>/.env (+ the gateway .env),
- *      generates the auth RS256 keypair, creates the storage dirs, and runs
- *      every service's phinx migrations.
+ *      generates the auth RS256 keypair, creates the storage dirs, runs every
+ *      service's phinx migrations, and creates the first admin login (shown on
+ *      the final screen so you can sign in at management.tracht-digital.de).
  *
  * SECURITY: this script writes config + connects to your database. It
  * refuses to run once the stack is configured (a .tds-installed lock or an
@@ -124,6 +125,11 @@ function env_for(string $name, array $c): string
                 . "COOKIE_NAME=tds_session\n"
                 . "LOGIN_RATE_LIMIT=10\n"
                 . "LOGIN_RATE_WINDOW_SECONDS=900\n"
+                // Bootstrap-Admin-Identität dokumentieren, damit ein späterer
+                // manueller `composer create-admin` / Seed dieselbe Kennung nutzt.
+                // Das Konto selbst legt der Installer direkt an (create_admin-Schritt);
+                // das Passwort steht bewusst NICHT im Klartext in der .env.
+                . "ADMIN_BOOTSTRAP_EMAIL={$c['admin_email']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
         case 'contact':
             return $base
@@ -186,6 +192,64 @@ function generate_keypair(string $authDir): array
     file_put_contents($pub, $details['key']);
     @chmod($pub, 0644);
     return [true, 'RS256-Schlüsselpaar erzeugt (keys/private.pem + public.pem).'];
+}
+
+/**
+ * Create (or promote) the admin login directly in the auth database.
+ *
+ * The auth migrations already *seed* a bootstrap admin, but that seed reads
+ * ADMIN_BOOTSTRAP_EMAIL/PASSWORD from the process env — which the gateway's
+ * in-process migrator never populates from services/auth/.env, so it always
+ * falls back to the public default. This step therefore writes the operator's
+ * chosen credentials straight into `app_user` (idempotent), so the login shown
+ * on the final screen is guaranteed to work. `must_change_password = 1` keeps
+ * the credential useless until the operator sets their own password on first
+ * login. Runs after migrate_auth (needs the `app_user` table).
+ */
+function create_admin_account(array $c): array
+{
+    $email = strtolower(trim((string) ($c['admin_email'] ?? '')));
+    if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        return [false, 'Ungültige Admin-E-Mail — Konto nicht angelegt.'];
+    }
+    $password = (string) ($c['admin_password'] ?? '');
+    if ($password === '') {
+        return [false, 'Kein Admin-Passwort gesetzt — Konto nicht angelegt.'];
+    }
+    $hash = password_hash($password, PASSWORD_ARGON2ID);
+    if ($hash === false) {
+        return [false, 'Passwort-Hashing fehlgeschlagen.'];
+    }
+
+    try {
+        $pdo = new PDO(
+            dsn_db($c['db_host'], $c['db_port'], $c['db_auth']),
+            $c['db_user'],
+            $c['db_pass'],
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5]
+        );
+        $find = $pdo->prepare('SELECT id FROM app_user WHERE email = :email LIMIT 1');
+        $find->execute(['email' => $email]);
+        $existingId = $find->fetchColumn();
+
+        if ($existingId !== false) {
+            // Bestehendes Konto (z. B. vom Seed) zum aktiven Admin machen —
+            // Passwort NICHT überschreiben, damit ein bereits gesetztes bleibt.
+            $pdo->prepare('UPDATE app_user SET is_admin = 1, status = \'active\', updated_at = NOW() WHERE id = :id')
+                ->execute(['id' => (int) $existingId]);
+            return [true, "Bestehendes Konto {$email} zum Admin gemacht (ID {$existingId})."];
+        }
+
+        $ins = $pdo->prepare(
+            'INSERT INTO app_user '
+            . '(email, password_hash, name, is_admin, customer_id, permissions, status, must_change_password, created_at, updated_at) '
+            . "VALUES (:email, :hash, 'Setup-Admin', 1, NULL, '[]', 'active', 1, NOW(), NOW())"
+        );
+        $ins->execute(['email' => $email, 'hash' => $hash]);
+        return [true, "Admin-Konto {$email} angelegt (ID {$pdo->lastInsertId()})."];
+    } catch (\Throwable $e) {
+        return [false, 'Admin-Konto konnte nicht angelegt werden: ' . $e->getMessage()];
+    }
 }
 
 /**
@@ -269,6 +333,7 @@ function install_tasks(): array
         ['migrate_contact', 'Migration: contact'],
         ['migrate_content', 'Migration: content'],
         ['migrate_customer','Migration: customer'],
+        ['create_admin', 'Admin-Konto'],
         ['finalize',     'Abschluss'],
     ];
 }
@@ -313,6 +378,9 @@ function run_task(string $id, array $c, string $gatewayDir, string $servicesDir,
         case 'migrate_customer':
             $name = substr($id, 8); // strip "migrate_"
             return run_migration($servicesDir . '/' . $name);
+
+        case 'create_admin':
+            return create_admin_account($c);
 
         case 'finalize':
             $ok = @file_put_contents($lockFile, gmdate('c') . "\n") !== false;
@@ -434,6 +502,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
     } elseif ($step === 3) {
         set_cfg([
             'admin_token' => post('admin_token') ?: token(),
+            'admin_email' => strtolower(post('admin_email')) ?: 'admin@tracht-digital.de',
+            'admin_password' => post('admin_password') ?: 'tds-setup-admin',
             'cors' => post('cors'),
             'cookie_domain' => post('cookie_domain', '.tracht-digital.de'),
             'jwt_issuer' => post('jwt_issuer', 'https://api.tracht-digital.de/auth'),
@@ -477,6 +547,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
         foreach (['auth', 'contact', 'content', 'customer'] as $name) {
             $applyResults['migrations'][$name] = run_task('migrate_' . $name, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
         }
+
+        $applyResults['admin'] = run_task('create_admin', $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
 
         run_task('finalize', $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
         $step = 5; // done
@@ -675,8 +747,18 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
         <legend>Kern</legend>
         <label>Admin-Token <span class="opt">(geteilt von auth/content/customer + /wiki)</span></label>
         <input type="text" name="admin_token" value="<?= h(cfg('admin_token', token())) ?>" />
+        <div class="row">
+          <div>
+            <label>Admin-Login E-Mail <span class="opt">(erstes Admin-Konto)</span></label>
+            <input type="text" name="admin_email" value="<?= h(cfg('admin_email', 'admin@tracht-digital.de')) ?>" autocomplete="off" />
+          </div>
+          <div>
+            <label>Admin-Passwort <span class="opt">(min. 8 Zeichen; Wechsel beim 1. Login erzwungen)</span></label>
+            <input type="text" name="admin_password" value="<?= h(cfg('admin_password', 'tds-setup-admin')) ?>" autocomplete="off" />
+          </div>
+        </div>
         <label>CORS-Origins <span class="opt">(kommagetrennt)</span></label>
-        <input type="text" name="cors" value="<?= h(cfg('cors', 'https://tracht-digital.de,https://blog.tracht-digital.de,https://admin.tracht-digital.de,https://app.tracht-digital.de')) ?>" />
+        <input type="text" name="cors" value="<?= h(cfg('cors', 'https://tracht-digital.de,https://blog.tracht-digital.de,https://admin.tracht-digital.de,https://management.tracht-digital.de,https://app.tracht-digital.de')) ?>" />
         <div class="row">
           <div><label>Cookie-Domain</label><input type="text" name="cookie_domain" value="<?= h(cfg('cookie_domain', '.tracht-digital.de')) ?>" /></div>
           <div><label>Auth-API-URL</label><input type="text" name="auth_api_url" value="<?= h(cfg('auth_api_url', 'https://api.tracht-digital.de/auth')) ?>" /></div>
@@ -717,6 +799,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       <div class="check"><span class="badge b-ok">.env</span><span>auth, contact, content, customer + gateway</span></div>
       <div class="check"><span class="badge b-ok">Keys</span><span>Auth RS256-Schlüsselpaar</span></div>
       <div class="check"><span class="badge <?= migrations_available() ? 'b-ok' : 'b-warn' ?>">Migrationen</span><span><?= migrations_available() ? 'phinx je Service' : 'proc_open deaktiviert — manuell nötig' ?></span></div>
+      <div class="check"><span class="badge b-ok">Admin</span><span><?= h(cfg('admin_email', 'admin@tracht-digital.de')) ?> (Login für management.tracht-digital.de)</span></div>
     </div>
 
     <button class="btn" type="button" id="startBtn" data-tasks='<?= h(json_encode(install_tasks(), JSON_UNESCAPED_UNICODE)) ?>'>Jetzt installieren →</button>
@@ -733,6 +816,13 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     <!-- Completion panel (revealed by JS when every task is done) -->
     <div id="donePanel" hidden>
       <h2 id="doneHeading">Installation abgeschlossen</h2>
+      <div class="note ok">
+        <strong>Admin-Login</strong> — melden Sie sich im Admin-Panel unter
+        <code>https://management.tracht-digital.de</code> an:<br />
+        E-Mail: <code><?= h(cfg('admin_email', 'admin@tracht-digital.de')) ?></code><br />
+        Passwort: <code><?= h(cfg('admin_password', 'tds-setup-admin')) ?></code><br />
+        Sie werden beim ersten Login zum Setzen eines eigenen Passworts aufgefordert.
+      </div>
       <div class="note ok">
         Fertig — es müssen <strong>keine Dienst-Prozesse gestartet</strong> werden: Das Gateway bedient die
         vier APIs im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die Plattform
@@ -870,6 +960,17 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
         <div class="check"><span class="badge <?= $ok ? 'b-ok' : 'b-err' ?>"><?= $ok ? 'OK' : 'Fehler' ?></span><span><?= h($name) ?></span></div>
         <?php if (!$ok && $out): ?><pre><?= h($out) ?></pre><?php endif; ?>
       <?php endforeach; ?>
+      <?php if (!empty($res['admin'])): ?>
+        <h2>Admin-Konto</h2>
+        <div class="check"><span class="badge <?= $res['admin'][0] ? 'b-ok' : 'b-err' ?>"><?= $res['admin'][0] ? 'OK' : 'Fehler' ?></span><span><?= h($res['admin'][1]) ?></span></div>
+      <?php endif; ?>
+      <div class="note ok">
+        <strong>Admin-Login</strong> — Admin-Panel unter
+        <code>https://management.tracht-digital.de</code>:<br />
+        E-Mail: <code><?= h(cfg('admin_email', 'admin@tracht-digital.de')) ?></code> ·
+        Passwort: <code><?= h(cfg('admin_password', 'tds-setup-admin')) ?></code><br />
+        Passwortwechsel wird beim ersten Login erzwungen.
+      </div>
     <?php elseif (!empty($selfDeleted)): ?>
       <div class="note ok">install.php wurde gelöscht. Der Assistent ist nicht mehr erreichbar.</div>
     <?php endif; ?>

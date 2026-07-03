@@ -225,8 +225,8 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   when a service gains an env var.
 - **Apply phase is a per-task AJAX driver, not one blocking POST.** Step 4 runs
   each install step (`install_tasks()` / `run_task()`: env writes → keypair →
-  dirs → the four phinx migrations → finalize) as its own small JSON request
-  while a progress bar advances. This replaced the old "do everything in one
+  dirs → the four phinx migrations → **create_admin** → finalize) as its own small
+  JSON request while a progress bar advances. This replaced the old "do everything in one
   request" apply that appeared to hang (four serial migrations blew past
   `max_execution_time`; `run_migration` blocked forever on `stream_get_contents`).
   Now: tasks run with `set_time_limit(0)`, `run_migration` reads non-blocking
@@ -234,6 +234,22 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   keys on the **`.tds-installed` lock only** (NOT `services/auth/.env`) — the
   first task writes that `.env`, so an `$alreadyInstalled`-style guard there would
   abort every later task. A `<noscript>` form keeps the single-request fallback.
+- **Admin login (step 3 config + `create_admin` task).** Step 3 collects the
+  first admin's e-mail + password (defaults `admin@tracht-digital.de` /
+  `tds-setup-admin`). The `create_admin` task runs *after* `migrate_auth` and
+  writes the row straight into `app_user` via PDO (idempotent: promotes an
+  existing e-mail to admin instead of duplicating), with `must_change_password=1`.
+  This is deliberately **not** left to the auth `seed_bootstrap_admin` migration:
+  that seed reads `ADMIN_BOOTSTRAP_*` from the *process* env, which the in-process
+  migrator never populates from `services/auth/.env`, so it would always fall back
+  to the public default and the operator would never see working credentials. The
+  chosen e-mail is still mirrored into auth's `.env` as `ADMIN_BOOTSTRAP_EMAIL`
+  (identity only — the password is not persisted in plaintext). Both done screens
+  (JS `donePanel` + no-JS step 5) print the login and the admin-panel URL
+  (`management.tracht-digital.de`).
+- **CORS default** lists `management.tracht-digital.de` (the admin panel's current
+  address) alongside `admin.`/`app.`/blog/landing — keep it in sync with the four
+  services' `.env.example` `CORS_ALLOWED_ORIGINS`.
 - **Security:** refuses to run once a `.tds-installed` lock (bundle root) or
   `services/auth/.env` exists (wizard entry guard), and offers self-delete. It
   ships in every bundle and is an open setup endpoint **before** first install —
