@@ -502,7 +502,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex" />
 <title>TDS API — Installation</title>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   /* Flat design — matches the admin/customer panels: solid surfaces, hairlines
      + accent bars, one navy accent, 0.75rem radius. No gradients, no blur, no
@@ -511,7 +511,6 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     --ink:#1a1a17;--muted:#6b6b66;--card:#fff;
     --ok:#146c43;--okbg:#e6f4ea;--err:#a51d1d;--errbg:#fbeaea;--warn:#8a5a00;--warnbg:#fff4d6;
     --tint:color-mix(in srgb,var(--haupt) 7%,var(--paper));
-    --serif:"Instrument Serif",Georgia,serif;
     --fd:"Hanken Grotesk",system-ui,sans-serif;--fb:"Plus Jakarta Sans",system-ui,sans-serif;
     --fm:"JetBrains Mono",ui-monospace,monospace;}
   *{box-sizing:border-box}
@@ -523,7 +522,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
   .brandmark{display:inline-flex;align-items:center;gap:10px;margin-bottom:14px}
   .brandmark .mk{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:#fff;
     font-family:var(--fd);font-weight:800;font-size:16px;background:var(--haupt)}
-  .brandmark .wd{font-family:var(--serif);font-weight:400;font-size:18px;letter-spacing:.01em}
+  .brandmark .wd{font-family:var(--fd);font-weight:600;font-size:18px;letter-spacing:-.01em}
   .brandmark .wd i{font-style:italic;color:var(--akzent)}
 
   h1{font-family:var(--fd);font-weight:800;letter-spacing:-.03em;font-size:clamp(28px,5vw,38px);
