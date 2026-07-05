@@ -75,6 +75,14 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
   proxy forwards them; injecting gateway CORS would duplicate
   `Access-Control-Allow-Origin`. OPTIONS preflights are forwarded so the
   upstream's CorsMiddleware answers them.
+- **Don't statically serve `/content/uploads/`.** Blog cover/body images live
+  under `/content/uploads/{slug}/{file}` and are user content — content-api's
+  `UploadServeAction` stamps the anti-XSS headers (nosniff, sandbox CSP, and
+  `Content-Disposition: attachment` for SVG). Whether the front door is this
+  PHP gateway, `deploy/nginx.conf.example`, or the Docker stack, uploads must
+  reach that PHP action; a static `alias` shortcut to "offload PHP" drops the
+  hardening and re-exposes stored XSS via a crafted SVG. Same header-ownership
+  rule as CORS: the upstream owns it, the front door just forwards.
 - **Keep Content-Encoding, drop Content-Length** on the response. We forward
   the exact upstream body bytes (gzipped or not); the emitter recomputes
   length. Forwarding the upstream's Content-Length would risk a mismatch.

@@ -20,6 +20,14 @@ server {
     }
 
     location /content/ {
+        # Everything under /content/ — including /content/uploads/{slug}/{file}
+        # (blog cover/body images) — MUST proxy to the PHP upstream. Do NOT add a
+        # static `location /content/uploads/ { alias ...; }` shortcut: uploads are
+        # user content, and content-api's UploadServeAction is what stamps the
+        # anti-XSS response headers (X-Content-Type-Options: nosniff, a sandbox
+        # CSP, and Content-Disposition: attachment for image/svg+xml). Serving the
+        # files statically would drop all of that and re-expose stored XSS via a
+        # crafted SVG. proxy_pass forwards the upstream headers as-is — keep it.
         proxy_pass http://127.0.0.1:8001/;
     }
 
