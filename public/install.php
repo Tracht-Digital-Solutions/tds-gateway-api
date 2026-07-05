@@ -12,8 +12,11 @@ declare(strict_types=1);
  *      ability to run migrations.
  *   2. Database — host/port/user/pass + one db name per service; tests the
  *      connection and can create the databases if they don't exist yet.
- *   3. Secrets — shared admin token, document-sign secret, CORS, plus the
- *      optional third-party keys (Resend, Stripe, GitHub).
+ *   3. Secrets — shared admin token, document-sign secret, the settings-
+ *      encryption key, CORS. Third-party service keys (Stripe, Resend email,
+ *      GitHub blog-rebuild) are NOT set here anymore — they're configured at
+ *      runtime in the admin panel (Einrichtungsassistent / Einstellungen),
+ *      stored encrypted in each service's app_setting table.
  *   4. Install — writes each services/<name>/.env (+ the gateway .env),
  *      generates the auth RS256 keypair, creates the storage dirs, runs every
  *      service's phinx migrations, and creates the first admin login (shown on
@@ -132,34 +135,34 @@ function env_for(string $name, array $c): string
                 . "ADMIN_BOOTSTRAP_EMAIL={$c['admin_email']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
         case 'contact':
+            // Resend keys (RESEND_API_KEY/RESEND_FROM/CONTACT_EMAIL) are set at
+            // runtime in the admin panel, encrypted under SETTINGS_ENCRYPTION_KEY.
             return $base
                 . "DB_NAME={$c['db_contact']}\n"
-                . "RESEND_API_KEY={$c['resend_api_key']}\n"
-                . "RESEND_FROM={$c['resend_from']}\n"
-                . "CONTACT_EMAIL={$c['contact_email']}\n"
+                . "AUTH_API_URL={$c['auth_api_url']}\n"
+                . "JWKS_CACHE_TTL=600\n"
+                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
                 . "RATE_LIMIT_PER_HOUR=3\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
         case 'content':
+            // The GitHub blog-rebuild token + BLOG_REBUILD_* are set at runtime
+            // in the admin panel, encrypted under SETTINGS_ENCRYPTION_KEY.
             return $base
                 . "DB_NAME={$c['db_content']}\n"
                 . "ADMIN_TOKEN={$c['admin_token']}\n"
                 . "AUTH_API_URL={$c['auth_api_url']}\n"
                 . "BLOG_UPLOAD_DIR={$c['blog_upload_dir']}\n"
-                . "GITHUB_DISPATCH_TOKEN={$c['github_token']}\n"
-                . "BLOG_REBUILD_REPO=Tracht-Digital-Solutions/tds-blog\n"
-                . "BLOG_REBUILD_WORKFLOW=build.yml\n"
-                . "BLOG_REBUILD_REF=main\n"
+                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
         case 'customer':
+            // Stripe keys are set at runtime in the admin panel, encrypted under
+            // SETTINGS_ENCRYPTION_KEY.
             return $base
                 . "DB_NAME={$c['db_customer']}\n"
                 . "AUTH_API_URL={$c['auth_api_url']}\n"
                 . "JWKS_CACHE_TTL=600\n"
                 . "ADMIN_TOKEN={$c['admin_token']}\n"
-                . "STRIPE_SECRET_KEY={$c['stripe_secret']}\n"
-                . "STRIPE_WEBHOOK_SECRET={$c['stripe_webhook']}\n"
-                . "STRIPE_PUBLIC_KEY={$c['stripe_public']}\n"
-                . "STRIPE_RETURN_URL={$c['stripe_return_url']}\n"
+                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
                 . "DOCUMENT_ROOT_DIR={$c['document_root_dir']}\n"
                 . "DOCUMENT_SIGN_SECRET={$c['document_sign_secret']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
@@ -509,14 +512,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
             'jwt_issuer' => post('jwt_issuer', 'https://api.tracht-digital.de/auth'),
             'jwt_key_id' => post('jwt_key_id', 'tds-auth-2026-1'),
             'auth_api_url' => post('auth_api_url', 'https://api.tracht-digital.de/auth'),
-            'resend_api_key' => post('resend_api_key'),
-            'resend_from' => post('resend_from', 'noreply@tracht-digital.de'),
-            'contact_email' => post('contact_email', 'hallo@tracht-digital.de'),
-            'github_token' => post('github_token'),
-            'stripe_secret' => post('stripe_secret'),
-            'stripe_webhook' => post('stripe_webhook'),
-            'stripe_public' => post('stripe_public'),
-            'stripe_return_url' => post('stripe_return_url', 'https://app.tracht-digital.de/invoices'),
+            // Third-party service keys (Stripe, Resend email, GitHub blog-
+            // rebuild) are NO LONGER set here — they're configured at runtime in
+            // the admin panel (Einrichtungsassistent / Einstellungen) and stored
+            // encrypted in each service's app_setting table. The installer only
+            // provisions the shared encryption key that protects those secrets.
+            'settings_encryption_key' => post('settings_encryption_key') ?: token(32),
             'document_sign_secret' => post('document_sign_secret') ?: token(32),
             'document_root_dir' => post('document_root_dir', $BUNDLE_DIR . '/var/customer-files'),
             'blog_upload_dir' => post('blog_upload_dir', $BUNDLE_DIR . '/var/blog-uploads'),
@@ -740,7 +741,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 
   <?php elseif ($step === 3): ?>
     <h2>Konfiguration</h2>
-    <p>Geheimnisse + Dienst-URLs. Vorgaben sind sinnvoll voreingestellt; Drittanbieter-Schlüssel können leer bleiben und später ergänzt werden.</p>
+    <p>Geheimnisse + Dienst-URLs. Vorgaben sind sinnvoll voreingestellt. Drittanbieter-Schlüssel (Stripe, E-Mail/Resend, GitHub) werden hier <strong>nicht mehr</strong> gesetzt — sie konfigurierst du nach der Installation im Admin-Panel unter „Einstellungen“ bzw. dem Einrichtungsassistenten.</p>
     <form method="post">
       <input type="hidden" name="__step" value="3" />
       <fieldset>
@@ -765,19 +766,8 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
         </div>
         <label>Document-Sign-Secret <span class="opt">(leer = automatisch)</span></label>
         <input type="text" name="document_sign_secret" value="<?= h(cfg('document_sign_secret', token(32))) ?>" />
-      </fieldset>
-      <fieldset>
-        <legend>Drittanbieter (optional)</legend>
-        <label>Resend API-Key <span class="opt">(Kontaktformular-Mail)</span></label>
-        <input type="text" name="resend_api_key" value="<?= h(cfg('resend_api_key')) ?>" />
-        <div class="row">
-          <div><label>Stripe Secret Key</label><input type="text" name="stripe_secret" value="<?= h(cfg('stripe_secret')) ?>" /></div>
-          <div><label>Stripe Webhook Secret</label><input type="text" name="stripe_webhook" value="<?= h(cfg('stripe_webhook')) ?>" /></div>
-        </div>
-        <div class="row">
-          <div><label>Stripe Public Key</label><input type="text" name="stripe_public" value="<?= h(cfg('stripe_public')) ?>" /></div>
-          <div><label>GitHub Dispatch Token <span class="opt">(Blog-Rebuild)</span></label><input type="text" name="github_token" value="<?= h(cfg('github_token')) ?>" /></div>
-        </div>
+        <label>Settings-Encryption-Key <span class="opt">(leer = automatisch; verschlüsselt die im Admin-Panel gesetzten Dienst-Secrets)</span></label>
+        <input type="text" name="settings_encryption_key" value="<?= h(cfg('settings_encryption_key', token(32))) ?>" />
       </fieldset>
       <fieldset>
         <legend>Speicherpfade</legend>

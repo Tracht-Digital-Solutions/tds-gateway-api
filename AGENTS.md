@@ -231,6 +231,13 @@ needed). That asymmetric failure is the tell for an unset/expired token.
 - Writes `services/<name>/.env` (+ gateway `.env`) from the same templates as
   the `.env.example`s / `deploy/docker-entrypoint.sh`; keep all three in sync
   when a service gains an env var.
+- **Only installation-relevant secrets are set here.** Step 3 no longer collects
+  third-party service keys (Stripe, Resend email, GitHub blog-rebuild) — those are
+  configured at runtime in the admin panel (Einrichtungsassistent / Einstellungen)
+  and stored encrypted in each service's `app_setting` table. The installer only
+  provisions a per-service `SETTINGS_ENCRYPTION_KEY` (auto-generated, like
+  `document_sign_secret`) that protects those runtime secrets — written into the
+  content/contact/customer `.env` blocks in `env_for()`.
 - **Apply phase is a per-task AJAX driver, not one blocking POST.** Step 4 runs
   each install step (`install_tasks()` / `run_task()`: env writes → keypair →
   dirs → the four phinx migrations → **create_admin** → finalize) as its own small

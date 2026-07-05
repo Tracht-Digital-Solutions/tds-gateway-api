@@ -67,6 +67,11 @@ DB_PORT=$DB_PORT
 DB_NAME=${CONTACT_DB_NAME:-tds_contact_ratelimit}
 DB_USER=$DB_USER
 DB_PASS=$DB_PASS
+AUTH_API_URL=$AUTH_API_URL
+JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
+SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+# Resend keys are optional env fallbacks — normally set at runtime in the admin
+# panel (Einrichtungsassistent / Einstellungen), stored encrypted in app_setting.
 RESEND_API_KEY=${RESEND_API_KEY:-}
 RESEND_FROM=${RESEND_FROM:-noreply@tracht-digital.de}
 CONTACT_EMAIL=${CONTACT_EMAIL:-hallo@tracht-digital.de}
@@ -84,6 +89,9 @@ DB_PASS=$DB_PASS
 ADMIN_TOKEN=$ADMIN_TOKEN
 AUTH_API_URL=$AUTH_API_URL
 BLOG_UPLOAD_DIR=${BLOG_UPLOAD_DIR:-/srv/tds/var/blog-uploads}
+SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+# GitHub blog-rebuild config is optional env fallback — normally set at runtime
+# in the admin panel, stored encrypted in app_setting.
 GITHUB_DISPATCH_TOKEN=${GITHUB_DISPATCH_TOKEN:-}
 BLOG_REBUILD_REPO=${BLOG_REBUILD_REPO:-Tracht-Digital-Solutions/tds-blog}
 BLOG_REBUILD_WORKFLOW=${BLOG_REBUILD_WORKFLOW:-build.yml}
@@ -101,6 +109,9 @@ DB_PASS=$DB_PASS
 AUTH_API_URL=$AUTH_API_URL
 JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
 ADMIN_TOKEN=$ADMIN_TOKEN
+SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+# Stripe keys are optional env fallbacks — normally set at runtime in the admin
+# panel (Einrichtungsassistent / Einstellungen), stored encrypted in app_setting.
 STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
 STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
 STRIPE_PUBLIC_KEY=${STRIPE_PUBLIC_KEY:-}

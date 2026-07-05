@@ -98,9 +98,13 @@ also run **from the bundle**: the assemble workflow re-adds phinx after the
 `services/<name>/` without a composer install on the host (the web installer at
 `/install.php` and `bin/migrate-stack.sh` both do this for you).
 
-Each service still needs its own `.env` on the host (DB creds, JWT keys,
-Resend/Stripe secrets — see each service's INSTALL.md; the `/install.php` wizard
-writes them all). The gateway itself needs only `ADMIN_TOKEN` if you want the
+Each service still needs its own `.env` on the host (DB creds, JWT keys, plus a
+`SETTINGS_ENCRYPTION_KEY` on content/contact/customer — see each service's
+INSTALL.md; the `/install.php` wizard writes them all). Third-party service
+secrets (Stripe, Resend email, the GitHub blog-rebuild token) are **not** in
+`.env` anymore — they're configured at runtime in the admin panel
+(Einrichtungsassistent / Einstellungen) and stored encrypted in each service's
+`app_setting` table. The gateway itself needs only `ADMIN_TOKEN` if you want the
 internal `/wiki` (set it to the same shared admin token; unset leaves the wiki
 disabled/404), plus — in **proxy** mode only — the `*_UPSTREAM` values if the
 ports differ from the defaults.

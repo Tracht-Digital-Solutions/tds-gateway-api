@@ -147,9 +147,17 @@ zusätzlich in den Passwort-Manager.
 - **auth**: DB-Zugang, JWT-Konfiguration. Zusätzlich `keys/private.pem` aus dem
   Passwort-Manager nach `services/auth/keys/` kopieren (Dateirechte `600`).
   `keys/public.pem` liegt bereits im Bundle.
-- **contact**: DB-Zugang (Rate-Limit-DB), Resend-API-Key.
-- **content**: DB-Zugang, `ADMIN_TOKEN`.
-- **customer**: DB-Zugang, Stripe-Keys, `ADMIN_TOKEN`, JWKS-URL.
+- **contact**: DB-Zugang (Rate-Limit-DB), `AUTH_API_URL`, `SETTINGS_ENCRYPTION_KEY`.
+  Der Resend-API-Key wird **nicht mehr** hier gesetzt, sondern zur Laufzeit im
+  Admin-Panel (Einrichtungsassistent / Einstellungen).
+- **content**: DB-Zugang, `ADMIN_TOKEN`, `SETTINGS_ENCRYPTION_KEY`. Der
+  GitHub-Blog-Rebuild-Token wird zur Laufzeit im Admin-Panel gesetzt.
+- **customer**: DB-Zugang, `ADMIN_TOKEN`, JWKS-URL, `SETTINGS_ENCRYPTION_KEY`.
+  Stripe-Keys (und Ticket-Mail/Lexware) werden zur Laufzeit im Admin-Panel gesetzt.
+
+Der `SETTINGS_ENCRYPTION_KEY` (vom Installer je Service erzeugt) verschlüsselt die
+im Admin-Panel gesetzten Dienst-Secrets in der `app_setting`-Tabelle. Ohne ihn
+werden Secrets im Klartext gespeichert (nur für Dev).
 - **gateway**: braucht standardmäßig **keine** `.env` — `GATEWAY_MODE=inprocess`
   ist der Default und findet die Services unter `services/<name>`. Nur für das
   interne `/wiki` zusätzlich `ADMIN_TOKEN` setzen (gleicher Admin-Token; ohne ihn
