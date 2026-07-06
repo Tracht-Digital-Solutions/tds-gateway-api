@@ -17,6 +17,7 @@ use Tds\ApiGateway\Action\WikiDataAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
 use Tds\ApiGateway\Http\CurlProxyClient;
+use Tds\ApiGateway\Http\RobotsTagMiddleware;
 use Tds\ApiGateway\Support\AdminSessionVerifier;
 use Tds\ApiGateway\Support\Logger;
 use Tds\ApiGateway\Support\MigrationRunner;
@@ -146,6 +147,14 @@ final class Bootstrap
         $app = AppFactory::create();
         $app->addRoutingMiddleware();
         $app->addErrorMiddleware($env('APP_ENV', 'production') !== 'production', true, true);
+
+        // API responses are machine-to-machine — never index them. Added *after*
+        // the error middleware (Slim middleware is LIFO, so this runs outermost)
+        // so the header also lands on error responses and on everything the
+        // catch-all dispatches to the in-process backends. Pairs with
+        // public/robots.txt (crawl block) as belt-and-suspenders; proxy/nginx
+        // prefix-routing mode sets the same header via deploy/nginx.conf.example.
+        $app->add(new RobotsTagMiddleware());
 
         $app->get('/', IndexAction::class);
         $app->get('/healthz', $healthAction);

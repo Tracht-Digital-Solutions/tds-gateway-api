@@ -103,6 +103,18 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
 - **Don't make the four services depend on the gateway, or read env outside their
   `Bootstrap`.** The in-process env scope only brackets `createApp`; an action
   reading `getenv()` at request time would escape it.
+- **The API surface is deliberately deindexed.** `Http\RobotsTagMiddleware`
+  stamps `X-Robots-Tag: noindex, nofollow` on every response — it's `add()`ed
+  *after* the error middleware (Slim middleware is LIFO → outermost), so error
+  responses and everything the catch-all dispatches to the in-process backends
+  carry it too. `public/robots.txt` (`Disallow: /`) is the matching crawl
+  block: robots.txt stops crawling, the header removes any URL-only index
+  entry — keep both. In the zero-hop nginx mode the middleware never runs, so
+  `deploy/nginx.conf.example` mirrors the header (`add_header … always`) and
+  serves the robots.txt inline. The middleware is a class, not a closure —
+  Slim binds closure middleware to the DI container and `bindTo()` on a
+  static closure returns null. The four backends need nothing (the gateway
+  fronts them); this exists only at the front door.
 
 ## Logging (`Support\Logger`)
 
