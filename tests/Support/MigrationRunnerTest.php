@@ -129,6 +129,45 @@ final class MigrationRunnerTest extends TestCase
         self::assertSame(['auth', 'content'], $calls, 'absent service dir is skipped, not failed');
     }
 
+    public function testSkipsAServiceWhoseMigrationClassNameCollides(): void
+    {
+        // Two services shipping the same class name would be an uncatchable
+        // fatal when Phinx includes both into the one in-process PHP process
+        // (the CreateAppSetting outage) — the later service must be skipped.
+        file_put_contents(
+            $this->servicesDir . '/auth/db/migrations/20260705000001_create_app_setting.php',
+            "<?php\nfinal class CreateAppSetting extends AbstractMigration {}\n",
+        );
+        file_put_contents(
+            $this->servicesDir . '/content/db/migrations/20260705000001_create_app_setting.php',
+            "<?php\nfinal class CreateAppSetting extends AbstractMigration {}\n",
+        );
+
+        $calls = [];
+        $this->runner($calls)->ensureMigrated();
+
+        self::assertSame(['auth'], $calls, 'colliding service must be skipped, not included');
+        self::assertSame([], glob($this->stateDir . '/.migrated-*') ?: [], 'a skipped service must not latch the marker');
+    }
+
+    public function testUniqueMigrationClassNamesAcrossServicesAllRun(): void
+    {
+        file_put_contents(
+            $this->servicesDir . '/auth/db/migrations/20260705000001_create_auth_app_setting.php',
+            "<?php\nfinal class CreateAuthAppSetting extends AbstractMigration {}\n",
+        );
+        file_put_contents(
+            $this->servicesDir . '/content/db/migrations/20260705000001_create_content_app_setting.php',
+            "<?php\nfinal class CreateContentAppSetting extends AbstractMigration {}\n",
+        );
+
+        $calls = [];
+        $this->runner($calls)->ensureMigrated();
+
+        self::assertSame(['auth', 'content'], $calls);
+        self::assertNotEmpty(glob($this->stateDir . '/.migrated-*'), 'unique class names migrate normally');
+    }
+
     public function testPhpCliBinaryNeverReturnsAnFpmBinary(): void
     {
         $bin = MigrationRunner::phpCliBinary();

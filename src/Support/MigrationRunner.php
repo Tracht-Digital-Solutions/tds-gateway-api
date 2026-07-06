@@ -33,6 +33,13 @@ namespace Tds\ApiGateway\Support;
  *    (see {@see HealthBody}) so the problem is visible instead of silent.
  *  - **Only pending work.** Phinx applies just the migrations not yet in
  *    `phinxlog`; a fully-migrated DB is a no-op.
+ *  - **Collision-guarded.** Phinx `include`s every migration file (applied or
+ *    not), and in-process all services share ONE PHP process — so two services
+ *    declaring the same migration class name would be an *uncatchable* fatal
+ *    redeclaration error on every request (the outage: three services shipped
+ *    an identical `CreateAppSetting`). Class names are scanned up front and a
+ *    colliding service is skipped + logged instead of fataling. Convention:
+ *    migration class names are service-prefixed / globally unique.
  */
 final class MigrationRunner
 {
@@ -97,10 +104,28 @@ final class MigrationRunner
             }
 
             $allOk = true;
+            $declared = []; // migration class name => service that declared it
             foreach ($this->serviceNames as $name) {
                 $dir = $this->servicesDir . '/' . $name;
                 if (!is_dir($dir)) {
                     continue; // service not in this bundle — skip, don't fail
+                }
+                $classes = $this->declaredMigrationClasses($dir);
+                $collisions = array_intersect_key($declared, array_flip($classes));
+                if ($collisions !== []) {
+                    $allOk = false;
+                    $this->logger?->error(
+                        "auto-migrate: {$name} skipped — migration class name collision "
+                            . '(would fatal when included into the shared process)',
+                        ['collisions' => array_map(
+                            fn (string $class): string => "{$class} already declared by '{$collisions[$class]}'",
+                            array_keys($collisions),
+                        )],
+                    );
+                    continue;
+                }
+                foreach ($classes as $class) {
+                    $declared[$class] = $name;
                 }
                 [$ok, $out] = ($this->migrate)($dir);
                 if ($ok) {
@@ -120,6 +145,28 @@ final class MigrationRunner
             flock($lock, LOCK_UN);
             fclose($lock);
         }
+    }
+
+    /**
+     * Class names a service's migration files declare, scanned as text without
+     * including them (an actual include of a duplicate would be the very fatal
+     * this guards against). Regex over `class X` is enough: Phinx migrations
+     * are conventionally one un-namespaced class per file.
+     *
+     * @return string[]
+     */
+    private function declaredMigrationClasses(string $serviceDir): array
+    {
+        $classes = [];
+        foreach ((array) glob($serviceDir . '/db/migrations/*.php') as $file) {
+            $src = (string) @file_get_contents((string) $file);
+            if (preg_match_all('/^\s*(?:final\s+|abstract\s+)?class\s+(\w+)/mi', $src, $m) > 0) {
+                foreach ($m[1] as $class) {
+                    $classes[] = $class;
+                }
+            }
+        }
+        return $classes;
     }
 
     /** Preferred state dir if writable, else a per-host temp dir, else null. */

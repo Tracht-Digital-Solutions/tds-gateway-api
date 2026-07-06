@@ -309,6 +309,15 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   is wanted. An exclusive non-blocking `flock` makes it single-flight (only the
   first worker migrates; others skip). Failures are logged and swallowed (never
   fatal) and do **not** write the marker, so they retry next request.
+- **Migration class names must be unique across ALL services.** Phinx `include`s
+  every migration file (applied or not) and in-process all services share one
+  PHP process, so two services declaring the same class is an **uncatchable**
+  fatal redeclaration error on every request — three services shipping an
+  identical `CreateAppSetting` took the whole API down. Convention: prefix the
+  class/filename with the service (`CreateContentAppSetting`, …). Defense:
+  `MigrationRunner` text-scans each service's declared migration classes before
+  running and **skips a colliding service with a logged error** (no marker →
+  health shows `db:no-schema`) instead of fataling.
 - **CLI-php resolution (subprocess fallback + install.php only):** under PHP-FPM
   `PHP_BINARY` is the FPM binary and can't run phinx (a prime suspect for
   "installer said OK but the DB is empty"). `MigrationRunner::phpCliBinary()`
