@@ -88,6 +88,14 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
   length. Forwarding the upstream's Content-Length would risk a mismatch.
 - **Don't add BodyParsingMiddleware.** The proxy needs the raw body
   (`(string) $request->getBody()`), not a parsed array.
+- **Every `php -S` needs `public/router.php`.** The built-in server 404s any
+  dotted path that has no file on disk *without ever invoking PHP* — the
+  gateway's `/wiki.json` and (in proxy mode) every upstream's
+  `/.well-known/jwks.json` silently die. `composer start`,
+  `bin/start-stack.sh` and both supervisor confs pass the router; keep it
+  when adding a new run mode. The router serves real files (`install.php`,
+  `robots.txt`) as-is and routes everything else to `index.php`. Apache
+  (.htaccess) and in-process mode are unaffected.
 - **Env helper:** never `$_ENV[$key] ?? getenv($key) ?: $default` — `??`
   binds tighter than `?:` and clobbers falsy values. Use explicit `?? false`
   (same bug that bit all four APIs).

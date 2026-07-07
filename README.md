@@ -81,7 +81,7 @@ locally with `php bin/gen-api-wiki.php`.
 ```bash
 composer install
 cp .env.example .env     # defaults already target localhost:800x
-composer start           # php -S localhost:8000 -t public
+composer start           # php -S localhost:8000 -t public public/router.php
 composer test            # phpunit
 ```
 

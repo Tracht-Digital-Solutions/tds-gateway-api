@@ -129,7 +129,7 @@ npm version patch && git push --follow-tags   # cut a release → CI publishes t
 composer install
 cp .env.example .env       # fill DB creds (+ Resend / Stripe / JWT keys per repo)
 composer migrate           # phinx migrate -e local
-composer start             # php -S localhost:<800x> -t public  (see port table above)
+composer start             # php -S localhost:<800x> -t public public/router.php  (see port table above)
 composer test              # phpunit
 ```
 
@@ -213,6 +213,19 @@ org-blocked** — deploy/dispatch shell stays inline per repo; the frontend
   `?? false` checks. Every API repo was bitten by this via copy-paste; the gateway's
   `Bootstrap::env()` follows the same safe pattern (and all five now carry a comment
   documenting the trap).
+- **CORS middleware must be added AFTER `addRoutingMiddleware()` — Slim middleware is
+  LIFO.** The LAST `$app->add()` runs FIRST, so `CorsMiddleware` added before routing
+  never sees an OPTIONS preflight: the routing middleware 405s it (no OPTIONS routes are
+  registered) and browsers block every cross-origin JSON/`Authorization` request —
+  including both panel logins. Bit all four APIs at once via copy-paste; each API's
+  `tests/PreflightTest.php` (OPTIONS through the real `Bootstrap::createApp()` app) is
+  the regression guard.
+- **Every `php -S` needs the service's `public/router.php`.** The built-in server 404s
+  any dotted path with no matching file on disk without invoking PHP —
+  `/.well-known/jwks.json` (JWT verification!) and the gateway's `/wiki.json` silently
+  die in local dev and the proxy-mode stack. `composer start`, `bin/start-stack.sh` and
+  the supervisor confs all pass the router; Apache (.htaccess) and in-process mode don't
+  need it.
 - **i18n in Astro:** call `tFor(Astro.currentLocale)` in `.astro` files; pass `lang` as a
   prop into React islands. Never read `translations.de`/`.en` directly — that bypass is what
   made the language toggle a no-op.

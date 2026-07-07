@@ -77,7 +77,10 @@ start_service() {
   # No `nohup` dependency (a restricted Plesk shell may lack it): a subshell
   # that ignores SIGHUP and detaches stdin is the portable POSIX equivalent —
   # the exec'd php keeps the ignore-HUP disposition and outlives the parent.
-  ( trap '' HUP; exec "$PHP_BIN" -S "127.0.0.1:$port" -t "$docroot" \
+  # public/router.php is REQUIRED for `php -S`: without a router script the
+  # built-in server 404s any dotted path that has no file on disk — e.g.
+  # /.well-known/jwks.json never reaches Slim, breaking JWT verification.
+  ( trap '' HUP; exec "$PHP_BIN" -S "127.0.0.1:$port" -t "$docroot" "$docroot/router.php" \
     >>"$TDS_LOG_DIR/tds-$name.log" 2>&1 </dev/null ) &
 }
 
@@ -90,8 +93,9 @@ if [ "$START_GATEWAY" = "1" ]; then
     log "gateway already listening on 127.0.0.1:8000 — leaving it."
   else
     log "Starting gateway on 0.0.0.0:8000…"
-    # See the note above: portable nohup-free detach for restricted shells.
-    ( trap '' HUP; exec "$PHP_BIN" -S "0.0.0.0:8000" -t "$GATEWAY_DIR/public" \
+    # See the notes above: portable nohup-free detach + router.php (the
+    # gateway serves /wiki.json, which php -S would otherwise 404).
+    ( trap '' HUP; exec "$PHP_BIN" -S "0.0.0.0:8000" -t "$GATEWAY_DIR/public" "$GATEWAY_DIR/public/router.php" \
       >>"$TDS_LOG_DIR/tds-gateway.log" 2>&1 </dev/null ) &
   fi
 fi
