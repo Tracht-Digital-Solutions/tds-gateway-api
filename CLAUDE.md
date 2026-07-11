@@ -31,9 +31,9 @@ inside one repo at a time.
 | Repo | Path | Owns |
 |---|---|---|
 | `tds-auth-api` | `/auth` (port 8003) | RS256 JWT issuance + JWKS; sessions |
-| `tds-contact-api` | `/contact` (port 8002) | Contact form → Resend email + rate limit |
+| `tds-contact-api` | `/contact` (port 8002) | Contact form → SMTP email + rate limit |
 | `tds-content-api` | `/content` (port 8001) | `blog_post` table (blog CRUD) + `content_block` table (editable landingpage section content, `/landing`; also backs the blog's "Aktuelle Themen" via the `topics` key, `/topics`) |
-| `tds-customer-api` | `/customer` (port 8004) | Customers, projects, invoices (Stripe), docs, time tracking |
+| `tds-customer-api` | `/customer` (port 8004) | Customers, projects, invoices (Stripe), docs, time tracking, support tickets (SMTP notifications + IMAP email→ticket ingest) |
 
 **API gateway — PHP 8.3 + Slim 4 (transparent reverse proxy):**
 
