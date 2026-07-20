@@ -9,6 +9,15 @@ the loopback `php -S` services instead (supervisor/nginx/Docker run modes). Same
 env-helper / CI / deploy-webhook conventions as the backends — read the root
 `CLAUDE.md` for the big picture.
 
+> Status: **required by both architectures — not superseded.** Today it bundles the
+> four legacy services (`auth`, `customer`, and the archived `content`/`contact` code,
+> still deployed until cutover). After the panel-platform cutover it must still route
+> to `tds-core-panel-api` + `tds-auth-api`. See the root `MIGRATION-STATUS.md`.
+>
+> Note: this repo also carries a `CLAUDE.md` — it is a **stale copy** of an older root
+> `CLAUDE.md` (pre-panel, mentions Resend/the ten repos). Trust the root
+> `C:\Projects\TDS-LP\CLAUDE.md` + this `AGENTS.md`, not the in-repo copy.
+
 ## Mental model
 
 - **Two modes, chosen in `Bootstrap` from `GATEWAY_MODE` (default `inprocess`).**
