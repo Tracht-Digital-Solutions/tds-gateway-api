@@ -1,4 +1,4 @@
-# CLAUDE.md — tds-api-gateway
+# CLAUDE.md — tds-gateway-api
 
 > This repo used to carry a full copy of the workspace-level `CLAUDE.md`. That copy
 > drifted (it described the pre-panel "ten repos" era, Resend, install-time content
@@ -10,7 +10,7 @@ For this repo specifically, read **`AGENTS.md`** (architecture + gotchas), and t
 
 ## Quick orientation
 
-`tds-api-gateway` is the single public entry for `api.tracht-digital.de`. It routes by
+`tds-gateway-api` is the single public entry for `api.tracht-digital.de`. It routes by
 first path segment to the backend services. By default (`GATEWAY_MODE=inprocess`) it runs
 each backend **in-process** in one PHP-FPM app; `GATEWAY_MODE=proxy` relays over HTTP to
 loopback `php -S` services instead.

@@ -1,6 +1,6 @@
 # TDS API — Wiki
 
-> **Auto-generiert** von `tds-api-gateway/bin/gen-api-wiki.php` aus den
+> **Auto-generiert** von `tds-gateway-api/bin/gen-api-wiki.php` aus den
 > Slim-Routendefinitionen der Services. Nicht von Hand bearbeiten — neue
 > Routen erscheinen beim nächsten Build automatisch.
 

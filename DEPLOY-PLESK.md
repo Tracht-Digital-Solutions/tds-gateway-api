@@ -15,11 +15,11 @@ einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 
 | (Sub)Domain | Repo | Branch | Art |
 |---|---|---|---|
-| `tracht-digital.de` | `tds-landingpage` | `release` | statisch (HTML/CSS/JS) |
-| `blog.tracht-digital.de` | `tds-blog` | `release` | statisch |
+| `tracht-digital.de` | `tds-landingpage-frontend` | `release` | statisch (HTML/CSS/JS) |
+| `blog.tracht-digital.de` | `tds-blog-frontend` | `release` | statisch |
 | `management.tracht-digital.de` | `tds-admin` | `release` | statisch |
-| `app.tracht-digital.de` | `tds-customer` | `release` | statisch |
-| `api.tracht-digital.de` | `tds-api-gateway` | `release` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
+| `app.tracht-digital.de` | `tds-customer-legacy-frontend` | `release` | statisch |
+| `api.tracht-digital.de` | `tds-gateway-api` | `release` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
 
 ---
 
@@ -280,7 +280,7 @@ Bundle gebaut wurde.
    löschen.
 5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
    Webhook-Secrets in den vier Frontend-Repos setzen.
-6. ☐ **`tds-blog` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
+6. ☐ **`tds-blog-frontend` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
    API live ist — die statischen Blog-Seiten backen ihre Artikel zur Build-Zeit
    und sind bis dahin leer (siehe Issue #1).
 7. ☐ End-to-End prüfen: Login `admin.`, Login `app.`, Kontaktformular auf der

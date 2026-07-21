@@ -1,4 +1,4 @@
-# tds-api-gateway
+# tds-gateway-api
 
 Single public entry point for the Tracht Digital Solutions micro-backends.
 It serves `api.tracht-digital.de` and routes by path prefix to the four PHP

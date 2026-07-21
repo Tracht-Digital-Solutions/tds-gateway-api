@@ -93,7 +93,7 @@ SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
 # GitHub blog-rebuild config is optional env fallback — normally set at runtime
 # in the admin panel, stored encrypted in app_setting.
 GITHUB_DISPATCH_TOKEN=${GITHUB_DISPATCH_TOKEN:-}
-BLOG_REBUILD_REPO=${BLOG_REBUILD_REPO:-Tracht-Digital-Solutions/tds-blog}
+BLOG_REBUILD_REPO=${BLOG_REBUILD_REPO:-Tracht-Digital-Solutions/tds-blog-frontend}
 BLOG_REBUILD_WORKFLOW=${BLOG_REBUILD_WORKFLOW:-build.yml}
 BLOG_REBUILD_REF=${BLOG_REBUILD_REF:-main}
 CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS

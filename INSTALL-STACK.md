@@ -35,7 +35,7 @@ man alternativ `main` auschecken und `composer install --no-dev` pro
 ## 1. Bundle holen
 
 ```bash
-git clone -b release https://github.com/Tracht-Digital-Solutions/tds-api-gateway.git /srv/tds
+git clone -b release https://github.com/Tracht-Digital-Solutions/tds-gateway-api.git /srv/tds
 cd /srv/tds
 ```
 

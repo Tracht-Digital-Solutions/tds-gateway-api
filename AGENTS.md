@@ -1,4 +1,4 @@
-# Agent notes — tds-api-gateway
+# Agent notes — tds-gateway-api
 
 PHP 8.3 + Slim 4 single entry for `api.tracht-digital.de`; routes by first path
 segment to the four micro-backends. **By default it runs each backend
@@ -198,7 +198,7 @@ The auto-reassembly loop spans two halves; both are live and verified.
    `release` is a separate manual button.
 
 To test the chain without an API push:
-`gh api -X POST repos/Tracht-Digital-Solutions/tds-api-gateway/dispatches
+`gh api -X POST repos/Tracht-Digital-Solutions/tds-gateway-api/dispatches
 -f event_type=api-pushed` — then confirm a `repository_dispatch`-triggered
 `dev` run lands and the `dev` branch SHA advances.
 
@@ -346,7 +346,7 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   down` and the gateway's aggregate (`HealthAction` / `InProcessHealthAction` via
   `Support\HealthBody`) flips to **503** when any service is reachable-but-un-
   migrated — so if auto-migration ever fails, the outage is visible instead of
-  hiding behind a bare `SELECT 1` (tds-api-gateway#4).
+  hiding behind a bare `SELECT 1` (tds-gateway-api#4).
 
 ## Tests
 

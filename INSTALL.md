@@ -1,4 +1,4 @@
-# INSTALL — tds-api-gateway
+# INSTALL — tds-gateway-api
 
 > **Deploying the whole stack (gateway + the four APIs)?** Pick a guide:
 > - [`DEPLOY-PLESK.md`](./DEPLOY-PLESK.md) — **the** production release guide for a
@@ -42,7 +42,7 @@ composer test
 
 ## 2. CI secrets
 
-### This repo (`tds-api-gateway`)
+### This repo (`tds-gateway-api`)
 
 | Secret | Purpose |
 |---|---|
@@ -53,7 +53,7 @@ composer test
 
 | Secret | Purpose |
 |---|---|
-| `GATEWAY_DISPATCH_TOKEN` | PAT that can POST `repository_dispatch` to `tds-api-gateway`. The new CI step skips quietly when it is unset. |
+| `GATEWAY_DISPATCH_TOKEN` | PAT that can POST `repository_dispatch` to `tds-gateway-api`. The new CI step skips quietly when it is unset. |
 
 ## 3. Production host
 

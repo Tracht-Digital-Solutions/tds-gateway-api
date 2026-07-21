@@ -11,7 +11,7 @@ Ein Befehl bringt die komplette API-Plattform hoch.
 
   ```
   TDS-LP/
-    tds-api-gateway/   ← hier
+    tds-gateway-api/   ← hier
     tds-auth-api/
     tds-contact-api/
     tds-content-api/
@@ -24,7 +24,7 @@ Ein Befehl bringt die komplette API-Plattform hoch.
 ## Schnellstart
 
 ```bash
-cd tds-api-gateway
+cd tds-gateway-api
 cp .env.docker.example .env.docker     # optional, aber empfohlen
 docker compose up --build
 ```
@@ -77,8 +77,8 @@ deployt. Wer sie lokal mitlaufen lassen will, baut zuerst je ein `dist/` und
 startet dann das `frontends`-Profil:
 
 ```bash
-for d in tds-landingpage tds-blog tds-admin tds-customer; do
-  (cd "../$d" && npm install && npm run build)   # braucht NPM_TOKEN für tds-shared
+for d in tds-landingpage-frontend tds-blog-frontend tds-admin tds-customer-legacy-frontend; do
+  (cd "../$d" && npm install && npm run build)   # braucht NPM_TOKEN für tds-shared-pkg
 done
 docker compose --profile frontends up --build
 ```
