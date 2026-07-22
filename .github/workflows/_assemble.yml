@@ -101,6 +101,14 @@ jobs:
         with: { repository: Tracht-Digital-Solutions/tds-ext-projects-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-projects-pkg }
       - uses: actions/checkout@v5
         with: { repository: Tracht-Digital-Solutions/tds-ext-documents-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-documents-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-support-tickets-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-support-tickets-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-contact-tickets-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-contact-tickets-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-website-cms-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-website-cms-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-blog-cms-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-blog-cms-pkg }
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -238,7 +246,11 @@ jobs:
               "tools":        "$(sha _src/tds-ext-tools-pkg)",
               "messages":     "$(sha _src/tds-ext-messages-pkg)",
               "projects":     "$(sha _src/tds-ext-projects-pkg)",
-              "documents":    "$(sha _src/tds-ext-documents-pkg)"
+              "documents":    "$(sha _src/tds-ext-documents-pkg)",
+              "support-tickets": "$(sha _src/tds-ext-support-tickets-pkg)",
+              "contact-tickets": "$(sha _src/tds-ext-contact-tickets-pkg)",
+              "website-cms":  "$(sha _src/tds-ext-website-cms-pkg)",
+              "blog-cms":     "$(sha _src/tds-ext-blog-cms-pkg)"
             }
           }
           EOF

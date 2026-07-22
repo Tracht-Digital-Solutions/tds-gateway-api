@@ -23,6 +23,10 @@
 #     --build-context ext_messages=../tds-ext-messages-pkg \
 #     --build-context ext_projects=../tds-ext-projects-pkg \
 #     --build-context ext_documents=../tds-ext-documents-pkg \
+#     --build-context ext_support_tickets=../tds-ext-support-tickets-pkg \
+#     --build-context ext_contact_tickets=../tds-ext-contact-tickets-pkg \
+#     --build-context ext_website_cms=../tds-ext-website-cms-pkg \
+#     --build-context ext_blog_cms=../tds-ext-blog-cms-pkg \
 #     -t tds-api .
 #
 # `docker compose up` wires those contexts for you (see docker-compose.yml).
@@ -40,15 +44,19 @@ COPY --from=frontend . ./frontend/
 # frontend's Composer `path` repos resolve to these siblings of /build/frontend
 # (../tds-frontend-contract-pkg + ../tds-ext-*). Keep the directory names EXACTLY
 # as referenced in tds-core-frontend-api/composer.json.
-COPY --from=contract         . ./tds-frontend-contract-pkg/
-COPY --from=ext_time_tracker . ./tds-ext-time-tracker-pkg/
-COPY --from=ext_customers    . ./tds-ext-customers-pkg/
-COPY --from=ext_billing      . ./tds-ext-billing-pkg/
-COPY --from=ext_lexware      . ./tds-ext-lexware-pkg/
-COPY --from=ext_tools        . ./tds-ext-tools-pkg/
-COPY --from=ext_messages     . ./tds-ext-messages-pkg/
-COPY --from=ext_projects     . ./tds-ext-projects-pkg/
-COPY --from=ext_documents    . ./tds-ext-documents-pkg/
+COPY --from=contract          . ./tds-frontend-contract-pkg/
+COPY --from=ext_time_tracker  . ./tds-ext-time-tracker-pkg/
+COPY --from=ext_customers     . ./tds-ext-customers-pkg/
+COPY --from=ext_billing       . ./tds-ext-billing-pkg/
+COPY --from=ext_lexware       . ./tds-ext-lexware-pkg/
+COPY --from=ext_tools         . ./tds-ext-tools-pkg/
+COPY --from=ext_messages      . ./tds-ext-messages-pkg/
+COPY --from=ext_projects      . ./tds-ext-projects-pkg/
+COPY --from=ext_documents     . ./tds-ext-documents-pkg/
+COPY --from=ext_support_tickets . ./tds-ext-support-tickets-pkg/
+COPY --from=ext_contact_tickets . ./tds-ext-contact-tickets-pkg/
+COPY --from=ext_website_cms   . ./tds-ext-website-cms-pkg/
+COPY --from=ext_blog_cms      . ./tds-ext-blog-cms-pkg/
 
 # Prod deps for the gateway + the two prefixed backends, then re-add phinx for
 # those two (they keep it in require-dev, but the running container needs the

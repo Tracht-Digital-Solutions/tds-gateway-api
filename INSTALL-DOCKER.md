@@ -17,9 +17,10 @@ komplette API-Plattform hoch.
     tds-customer-api/
     tds-core-frontend-api/    ← frontend (Default-Route)
     tds-frontend-contract-pkg/
-    tds-ext-time-tracker-pkg/  tds-ext-customers-pkg/  tds-ext-billing-pkg/
-    tds-ext-lexware-pkg/       tds-ext-tools-pkg/      tds-ext-messages-pkg/
-    tds-ext-projects-pkg/      tds-ext-documents-pkg/
+    tds-ext-time-tracker-pkg/     tds-ext-customers-pkg/       tds-ext-billing-pkg/
+    tds-ext-lexware-pkg/          tds-ext-tools-pkg/           tds-ext-messages-pkg/
+    tds-ext-projects-pkg/         tds-ext-documents-pkg/       tds-ext-support-tickets-pkg/
+    tds-ext-contact-tickets-pkg/  tds-ext-website-cms-pkg/     tds-ext-blog-cms-pkg/
   ```
 
   Sie werden als *named build contexts* ins Image gezogen — kein GitHub-Token,

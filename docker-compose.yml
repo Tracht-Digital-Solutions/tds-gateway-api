@@ -55,6 +55,10 @@ services:
         ext_messages: ../tds-ext-messages-pkg
         ext_projects: ../tds-ext-projects-pkg
         ext_documents: ../tds-ext-documents-pkg
+        ext_support_tickets: ../tds-ext-support-tickets-pkg
+        ext_contact_tickets: ../tds-ext-contact-tickets-pkg
+        ext_website_cms: ../tds-ext-website-cms-pkg
+        ext_blog_cms: ../tds-ext-blog-cms-pkg
     restart: unless-stopped
     depends_on:
       db:
