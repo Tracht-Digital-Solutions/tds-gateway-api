@@ -1,10 +1,22 @@
 name: Assemble (reusable)
 
-# Reusable: check the gateway, assemble gateway + all 4 services into a
+# Reusable: check the gateway, assemble gateway + the current backends into a
 # self-contained bundle, force-publish it to the `channel` branch, and
 # optionally ping the deploy webhook. Called by dev.yml (channel=dev, no
 # deploy) and release.yml (channel=release, deploy=true). Same-repo
 # workflow_call — no cross-repo org restriction.
+#
+# Services bundled (post frontend-platform cutover):
+#   auth      -> tds-auth-api            (/auth,  prefix-stripped)
+#   customer  -> tds-customer-api        (/customer, prefix-stripped)
+#   frontend  -> tds-core-frontend-api   (DEFAULT catch-all; composes the
+#                extension Modules in-process — replaces the archived
+#                content/contact backends)
+#
+# `frontend` composes its extensions via Composer `path` repos pointing at
+# sibling checkouts (../tds-ext-* + ../tds-frontend-contract-pkg); we check
+# those out next to it and force Composer to COPY (not symlink) the path repos
+# into vendor/ (COMPOSER_MIRROR_PATH_REPOS=1) so the bundle stays self-contained.
 
 on:
   workflow_call:
@@ -45,22 +57,6 @@ jobs:
           token: ${{ secrets.ASSEMBLE_TOKEN }}
           path: _src/auth
 
-      - name: Checkout tds-contact-api
-        uses: actions/checkout@v5
-        with:
-          repository: Tracht-Digital-Solutions/tds-contact-api
-          ref: main
-          token: ${{ secrets.ASSEMBLE_TOKEN }}
-          path: _src/contact
-
-      - name: Checkout tds-content-api
-        uses: actions/checkout@v5
-        with:
-          repository: Tracht-Digital-Solutions/tds-content-api
-          ref: main
-          token: ${{ secrets.ASSEMBLE_TOKEN }}
-          path: _src/content
-
       - name: Checkout tds-customer-api
         uses: actions/checkout@v5
         with:
@@ -68,6 +64,43 @@ jobs:
           ref: main
           token: ${{ secrets.ASSEMBLE_TOKEN }}
           path: _src/customer
+
+      - name: Checkout tds-core-frontend-api
+        uses: actions/checkout@v5
+        with:
+          repository: Tracht-Digital-Solutions/tds-core-frontend-api
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/frontend
+
+      # frontend's Composer `path` repos resolve to these siblings of _src/frontend
+      # (../tds-frontend-contract-pkg + ../tds-ext-*). Keep the directory names
+      # EXACTLY as referenced in tds-core-frontend-api/composer.json.
+      - name: Checkout tds-frontend-contract-pkg
+        uses: actions/checkout@v5
+        with:
+          repository: Tracht-Digital-Solutions/tds-frontend-contract-pkg
+          ref: main
+          token: ${{ secrets.ASSEMBLE_TOKEN }}
+          path: _src/tds-frontend-contract-pkg
+
+      - name: Checkout enabled extensions
+        uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-time-tracker-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-time-tracker-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-customers-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-customers-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-billing-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-billing-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-lexware-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-lexware-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-tools-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-tools-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-messages-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-messages-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-projects-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-projects-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-documents-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-documents-pkg }
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -86,7 +119,7 @@ jobs:
 
       - name: Install dependencies (production only)
         run: |
-          for dir in gateway auth contact content customer; do
+          for dir in gateway auth customer; do
             echo "::group::composer install $dir"
             composer install \
               --working-dir "_src/$dir" \
@@ -95,15 +128,32 @@ jobs:
             echo "::endgroup::"
           done
 
-      # The APIs keep phinx in require-dev, but the host needs it to run
-      # `vendor/bin/phinx migrate -e production` from the bundle (the whole
-      # point of the single-project deploy is that the host never runs a
-      # full composer install). Re-add it post --no-dev with the exact
-      # constraint each repo pins in require-dev, so the bundle ships the
-      # migration runner without dragging phpunit & friends along.
+      # frontend (tds-core-frontend-api) composes its extensions through Composer
+      # `path` repos to the sibling checkouts above. `composer update` re-resolves
+      # them fresh from `main` (the committed lock may lag those tips), and
+      # COMPOSER_MIRROR_PATH_REPOS=1 COPIES the path packages into vendor/ instead
+      # of symlinking — otherwise the bundle would ship dangling symlinks into
+      # _src/. It already carries phinx in `require` (its in-process auto-migrator
+      # runs the extensions' migrations), so no phinx re-add is needed here.
+      - name: Install frontend (compose extensions, mirror path repos)
+        env:
+          COMPOSER_MIRROR_PATH_REPOS: '1'
+        run: |
+          echo "::group::composer update frontend"
+          composer update \
+            --working-dir "_src/frontend" \
+            --no-dev --no-interaction --prefer-dist --no-progress \
+            --optimize-autoloader
+          echo "::endgroup::"
+
+      # auth + customer keep phinx in require-dev, but the host needs it to run
+      # `vendor/bin/phinx migrate -e production` from the bundle (the whole point
+      # of the single-project deploy is that the host never runs a full composer
+      # install). Re-add it post --no-dev with the exact constraint each repo pins,
+      # so the bundle ships the migration runner without dragging phpunit & friends.
       - name: Add phinx for host-side migrations
         run: |
-          for dir in auth contact content customer; do
+          for dir in auth customer; do
             constraint=$(jq -r '."require-dev"."robmorgan/phinx" // empty' "_src/$dir/composer.json")
             if [ -z "$constraint" ]; then
               echo "::warning title=phinx missing::_src/$dir has no robmorgan/phinx in require-dev - bundle ships without a migration runner for $dir."
@@ -140,7 +190,7 @@ jobs:
           # mode (GATEWAY_MODE=inprocess) requires — it requires
           # services/<name>/vendor/autoload.php at runtime. The Procfile/
           # services.json below describe the optional proxy-mode loopback ports.
-          for name in auth contact content customer; do
+          for name in auth customer frontend; do
             rsync -a \
               --exclude '.git' --exclude '.github' --exclude '.gitignore' \
               --exclude 'tests' \
@@ -152,9 +202,8 @@ jobs:
           cat > dist/Procfile <<'EOF'
           gateway: php -S 0.0.0.0:8000 -t gateway/public
           auth: php -S 127.0.0.1:8003 -t services/auth/public
-          contact: php -S 127.0.0.1:8002 -t services/contact/public
-          content: php -S 127.0.0.1:8001 -t services/content/public
           customer: php -S 127.0.0.1:8004 -t services/customer/public
+          frontend: php -S 127.0.0.1:8100 -t services/frontend/public
           EOF
 
           cat > dist/services.json <<'EOF'
@@ -162,9 +211,8 @@ jobs:
             "gateway": { "path": "gateway", "port": 8000 },
             "services": {
               "auth":     { "path": "services/auth",     "port": 8003, "public_prefix": "/auth" },
-              "contact":  { "path": "services/contact",  "port": 8002, "public_prefix": "/contact" },
-              "content":  { "path": "services/content",  "port": 8001, "public_prefix": "/content" },
-              "customer": { "path": "services/customer", "port": 8004, "public_prefix": "/customer" }
+              "customer": { "path": "services/customer", "port": 8004, "public_prefix": "/customer" },
+              "frontend": { "path": "services/frontend", "port": 8100, "public_prefix": "/", "default": true }
             }
           }
           EOF
@@ -178,9 +226,19 @@ jobs:
             "sources": {
               "gateway":  "$(sha _src/gateway)",
               "auth":     "$(sha _src/auth)",
-              "contact":  "$(sha _src/contact)",
-              "content":  "$(sha _src/content)",
-              "customer": "$(sha _src/customer)"
+              "customer": "$(sha _src/customer)",
+              "frontend": "$(sha _src/frontend)"
+            },
+            "frontend_extensions": {
+              "contract":     "$(sha _src/tds-frontend-contract-pkg)",
+              "time-tracker": "$(sha _src/tds-ext-time-tracker-pkg)",
+              "customers":    "$(sha _src/tds-ext-customers-pkg)",
+              "billing":      "$(sha _src/tds-ext-billing-pkg)",
+              "lexware":      "$(sha _src/tds-ext-lexware-pkg)",
+              "tools":        "$(sha _src/tds-ext-tools-pkg)",
+              "messages":     "$(sha _src/tds-ext-messages-pkg)",
+              "projects":     "$(sha _src/tds-ext-projects-pkg)",
+              "documents":    "$(sha _src/tds-ext-documents-pkg)"
             }
           }
           EOF
@@ -189,22 +247,20 @@ jobs:
           # tds-api-gateway — assembled bundle (generated)
 
           Do not edit. This branch is force-pushed by CI on every gateway or
-          API push. It contains the PHP gateway plus all four micro-backends
-          with their `vendor/` directories, ready to run.
+          API push. It contains the PHP gateway plus the current backends
+          (`auth`, `customer`, and the composed `frontend` = tds-core-frontend-api
+          with its extensions) with their `vendor/` directories, ready to run.
 
           Default run mode: point a PHP-FPM docroot at `gateway/public` — the
-          gateway serves all four services in-process (`GATEWAY_MODE=inprocess`),
-          nothing else to start. The `Procfile` / `deploy/supervisor.conf.example`
+          gateway serves every service in-process (`GATEWAY_MODE=inprocess`),
+          nothing else to start. `frontend` is the default (catch-all) upstream:
+          `/auth/*` and `/customer/*` route to those backends, everything else to
+          the composed frontend API. The `Procfile` / `deploy/supervisor.conf.example`
           are for the optional `GATEWAY_MODE=proxy` (loopback `php -S`). Each
-          service still needs its own `.env` on the host. See `BUILD_INFO.json`
-          for the source commit of each piece.
+          service still needs its own `.env` on the host. The internal API wiki
+          is served by the frontend API (`/wiki.json`), not the gateway. See
+          `BUILD_INFO.json` for the source commit of each piece.
           EOF
-
-      # Generate the API wiki from the just-checked-out route definitions so
-      # new routes always show up. Reads _src/<svc>/src/Bootstrap.php and
-      # writes dist/API-WIKI.md + dist/wiki/index.html (served gated at /wiki).
-      - name: Generate API wiki
-        run: php _src/gateway/bin/gen-api-wiki.php dist
 
       - name: Publish to ${{ inputs.channel }} branch
         uses: peaceiris/actions-gh-pages@v4

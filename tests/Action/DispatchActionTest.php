@@ -22,18 +22,26 @@ final class DispatchActionTest extends TestCase
         );
     }
 
+    /** Registry with the catch-all disabled, so an unmatched path 404s. */
+    private function registryNoDefault(): ServiceRegistry
+    {
+        return ServiceRegistry::fromEnv(
+            static fn (string $key, ?string $default = null): string =>
+                $key === 'GATEWAY_DEFAULT_SERVICE' ? '' : (string) $default,
+        );
+    }
+
     /**
-     * Dispatcher whose four services all use the injected resolver. The dirs
-     * are bogus (no .env → the env scope is a no-op), which is fine because the
+     * Dispatcher whose services all use the injected resolver. The dirs are
+     * bogus (no .env → the env scope is a no-op), which is fine because the
      * resolver is supplied directly.
      */
     private function dispatcher(callable $resolver): InProcessDispatcher
     {
         return new InProcessDispatcher([
             'auth' => ['/no/auth', 'X'],
-            'contact' => ['/no/contact', 'X'],
-            'content' => ['/no/content', 'X'],
             'customer' => ['/no/customer', 'X'],
+            'frontend' => ['/no/frontend', 'X'],
         ], $resolver);
     }
 
@@ -70,8 +78,10 @@ final class DispatchActionTest extends TestCase
         self::assertSame('api.tracht-digital.de', $captured['xfh']);
     }
 
-    public function testContactKeepsItsOwnRoute(): void
+    public function testDefaultServiceGetsUnmatchedPathVerbatim(): void
     {
+        // A path that matches no prefix falls through to `frontend` (the
+        // composed API) unchanged — its module routes live at root.
         $captured = [];
         $resolver = static function (string $dir, string $b) use (&$captured): App {
             $app = AppFactory::create();
@@ -80,6 +90,7 @@ final class DispatchActionTest extends TestCase
                 '/{path:.*}',
                 static function ($req, $res) use (&$captured) {
                     $captured['path'] = $req->getUri()->getPath();
+                    $captured['xfp'] = $req->getHeaderLine('X-Forwarded-Prefix');
                     return $res;
                 },
             );
@@ -87,20 +98,21 @@ final class DispatchActionTest extends TestCase
         };
         $action = new DispatchAction($this->registry(), $this->dispatcher($resolver));
         $request = (new ServerRequestFactory())
-            ->createServerRequest('POST', 'https://api.tracht-digital.de/contact');
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/tools/catalog');
         $action($request, new Response());
 
-        self::assertSame('/contact', $captured['path']);
+        self::assertSame('/tools/catalog', $captured['path']);
+        self::assertSame('/frontend', $captured['xfp']);
     }
 
-    public function testUnknownServiceReturns404(): void
+    public function testUnknownServiceReturns404WhenNoDefault(): void
     {
         $called = false;
         $resolver = static function () use (&$called): App {
             $called = true;
             return AppFactory::create();
         };
-        $action = new DispatchAction($this->registry(), $this->dispatcher($resolver));
+        $action = new DispatchAction($this->registryNoDefault(), $this->dispatcher($resolver));
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', 'https://api.tracht-digital.de/nope/x');
         $response = $action($request, new Response());
@@ -134,15 +146,15 @@ final class DispatchActionTest extends TestCase
             new Logger($logPath, 'info'),
         );
         $request = (new ServerRequestFactory())
-            ->createServerRequest('GET', 'https://api.tracht-digital.de/content/blog');
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/tickets/blog');
         $response = $action($request, new Response());
 
         self::assertSame(502, $response->getStatusCode());
         self::assertFileExists($logPath);
         $entry = json_decode(trim((string) file_get_contents($logPath)), true);
         self::assertSame('error', $entry['level']);
-        self::assertSame('/content', $entry['service']);
-        self::assertSame('/blog', $entry['path']);
+        self::assertSame('/frontend', $entry['service']);
+        self::assertSame('/tickets/blog', $entry['path']);
 
         @unlink($logPath);
     }

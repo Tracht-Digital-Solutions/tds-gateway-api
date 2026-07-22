@@ -1,18 +1,24 @@
 # Agent notes — tds-gateway-api
 
 PHP 8.3 + Slim 4 single entry for `api.tracht-digital.de`; routes by first path
-segment to the four micro-backends. **By default it runs each backend
-*in-process* (`GATEWAY_MODE=inprocess`)** — the whole API surface is one
-PHP-FPM app, with no service processes to start (the Plesk "install + start
-without SSH" model). An optional **`GATEWAY_MODE=proxy`** relays over HTTP to
-the loopback `php -S` services instead (supervisor/nginx/Docker run modes). Same
-env-helper / CI / deploy-webhook conventions as the backends — read the root
-`CLAUDE.md` for the big picture.
+segment to the backends. **By default it runs each backend *in-process*
+(`GATEWAY_MODE=inprocess`)** — the whole API surface is one PHP-FPM app, with no
+service processes to start (the Plesk "install + start without SSH" model). An
+optional **`GATEWAY_MODE=proxy`** relays over HTTP to the loopback `php -S`
+services instead (supervisor/nginx/Docker run modes). Same env-helper / CI /
+deploy-webhook conventions as the backends — read the root `CLAUDE.md` for the
+big picture.
 
-> Status: **required by both architectures — not superseded.** Today it bundles the
-> four legacy services (`auth`, `customer`, and the archived `content`/`contact` code,
-> still deployed until cutover). After the frontend-platform cutover it must still route
-> to `tds-core-frontend-api` + `tds-auth-api`. See the root `MIGRATION-STATUS.md`.
+> Status: **required by both architectures — not superseded.** Post frontend-platform
+> cutover it fronts **three** backends:
+> - `auth` → `tds-auth-api` (`/auth/*`, prefix-stripped)
+> - `customer` → `tds-customer-api` (`/customer/*`, prefix-stripped)
+> - `frontend` → `tds-core-frontend-api` — the **default (catch-all)** upstream: the
+>   composed base + extensions that replaced the archived `content`/`contact` backends.
+>   Everything not under `/auth` or `/customer` forwards to it verbatim (its module
+>   routes live at root: `/tickets`, `/tools`, `/admin/settings`, `/me/…`, `/wiki.json`).
+>
+> See the root `MIGRATION-STATUS.md`.
 >
 > Note: this repo also carries a `CLAUDE.md` — it is a **stale copy** of an older root
 > `CLAUDE.md` (pre-frontend, mentions Resend/the ten repos). Trust the root
@@ -21,23 +27,29 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
 ## Mental model
 
 - **Two modes, chosen in `Bootstrap` from `GATEWAY_MODE` (default `inprocess`).**
-  Both share the routing table and the `/`, `/healthz`, `/wiki` routes; only the
-  catch-all + health action differ.
+  Both share the routing table and the `/`, `/healthz` routes; only the catch-all
+  + health action differ. The gateway owns **no** routes of its own beyond those
+  two — it is a pure transparent router (the API wiki now lives in the frontend
+  API's `/wiki.json`, not here).
 - `Config\ServiceRegistry` is the routing table (prefix → `Service`), built
-  from env with baked defaults for the four known services. `match($path)`
-  returns `[Service, $remainder]`.
+  from env with baked defaults for the current backends. `match($path)` returns
+  `[Service, $remainder]`: an explicit prefix (`auth`/`customer`) strips the
+  segment; **anything else falls through to the default service** (`frontend`)
+  with the *whole* path preserved. `GATEWAY_DEFAULT_SERVICE` (default `frontend`)
+  names that catch-all; set it to `''` to restore the old "unmatched → 404".
 - `Service::targetFor($remainder, $query)` builds the upstream URL
   (`upstream + rewrite + remainder`) for **proxy** mode; `Service::pathFor($remainder)`
   is its host-less twin (`rewrite + remainder`, `''`→`/`) for the **in-process**
-  sub-request path. `rewrite` is empty for root-mounted services and `/contact`
-  for contact-api.
+  sub-request path. `rewrite` is empty for every current service (all mount at
+  root); the `isDefault` flag marks the catch-all.
 
 ### In-process mode (default)
 
 - `Dispatch\InProcessDispatcher` loads a service's `vendor/autoload.php` on
-  demand and calls `Tds\<Name>Api\Bootstrap::createApp($dir)->handle($subReq)`.
-  The prefix→`[dir, BootstrapFQCN]` map is built in `Bootstrap` from the registry
-  + `SERVICE_BOOTSTRAPS`; services live at `GATEWAY_SERVICES_DIR`
+  demand and calls `Tds\<Name>Api\Bootstrap::createApp($dir)->handle($subReq)`
+  (`Tds\AuthApi\`, `Tds\CustomerApi\`, `Tds\CoreFrontendApi\`). The
+  prefix→`[dir, BootstrapFQCN]` map is built in `Bootstrap` from the registry +
+  `SERVICE_BOOTSTRAPS`; services live at `GATEWAY_SERVICES_DIR`
   (default `<bundle>/services`).
 - **Env isolation is the crux.** Services do `Dotenv::createImmutable()->load()`
   and read `$_ENV`; a reused FPM worker keeps those globals, and an *immutable*
@@ -46,10 +58,11 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
   in a surgical env scope: it enumerates the service's `.env` keys with
   `Dotenv::parse` (side-effect free), clears exactly those from
   `$_ENV`/`$_SERVER`/`getenv`, then restores their prior state in a `finally`.
-  This is why the four services stay **byte-for-byte unchanged** (still run
-  standalone via `composer start`).
-- `Action\DispatchAction` is the catch-all (`/{path:.*}`): `match` → 404 if
-  unknown, add `X-Forwarded-*`, dispatch in-process, wrap any failure as a 502.
+  This is why the services stay **byte-for-byte unchanged** (still run standalone
+  via `composer start`).
+- `Action\DispatchAction` is the catch-all (`/{path:.*}`): `match` (→ 404 only if
+  the default service is disabled and no prefix matched), add `X-Forwarded-*`,
+  dispatch in-process, wrap any failure as a 502.
   `Action\InProcessHealthAction` runs each service's `/healthz` in-process and
   aggregates (a boot/dispatch failure = status 0), same JSON shape as the proxy
   `HealthAction`.
@@ -77,37 +90,39 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
 
 ## Gotchas / don't
 
-- **Don't strip the contact prefix.** contact-api's only route is `/contact`
-  and the frontend POSTs to `.../contact` with no sub-path. The registry
-  default rewrites `/contact` → `:8002/contact`. The other three strip.
+- **`frontend` is the default catch-all — don't strip anything for it.** Only
+  `/auth` and `/customer` are prefix-stripped; everything else is forwarded to
+  `tds-core-frontend-api` verbatim (its module routes live at root). Adding a new
+  prefixed backend means adding it to `ServiceRegistry::DEFAULTS` +
+  `Bootstrap::SERVICE_BOOTSTRAPS`; new frontend features need no gateway change
+  (they're just more root routes on the catch-all).
 - **Don't add CORS here.** Each upstream emits its own CORS headers and the
   proxy forwards them; injecting gateway CORS would duplicate
   `Access-Control-Allow-Origin`. OPTIONS preflights are forwarded so the
   upstream's CorsMiddleware answers them.
-- **Don't statically serve `/content/uploads/`.** Blog cover/body images live
-  under `/content/uploads/{slug}/{file}` and are user content — content-api's
-  `UploadServeAction` stamps the anti-XSS headers (nosniff, sandbox CSP, and
-  `Content-Disposition: attachment` for SVG). Whether the front door is this
-  PHP gateway, `deploy/nginx.conf.example`, or the Docker stack, uploads must
-  reach that PHP action; a static `alias` shortcut to "offload PHP" drops the
-  hardening and re-exposes stored XSS via a crafted SVG. Same header-ownership
-  rule as CORS: the upstream owns it, the front door just forwards.
+- **Don't statically serve upload routes.** Any file-serving route (blog/CMS
+  cover/body images, customer/document files) is user content — the owning API
+  stamps the anti-XSS headers (nosniff, sandbox CSP, and `Content-Disposition:
+  attachment` for SVG). Whether the front door is this PHP gateway,
+  `deploy/nginx.conf.example`, or the Docker stack, uploads must reach that PHP
+  action; a static `alias` shortcut to "offload PHP" drops the hardening and
+  re-exposes stored XSS via a crafted SVG. Same header-ownership rule as CORS:
+  the upstream owns it, the front door just forwards.
 - **Keep Content-Encoding, drop Content-Length** on the response. We forward
   the exact upstream body bytes (gzipped or not); the emitter recomputes
   length. Forwarding the upstream's Content-Length would risk a mismatch.
 - **Don't add BodyParsingMiddleware.** The proxy needs the raw body
   (`(string) $request->getBody()`), not a parsed array.
 - **Every `php -S` needs `public/router.php`.** The built-in server 404s any
-  dotted path that has no file on disk *without ever invoking PHP* — the
-  gateway's `/wiki.json` and (in proxy mode) every upstream's
-  `/.well-known/jwks.json` silently die. `composer start`,
-  `bin/start-stack.sh` and both supervisor confs pass the router; keep it
-  when adding a new run mode. The router serves real files (`install.php`,
-  `robots.txt`) as-is and routes everything else to `index.php`. Apache
-  (.htaccess) and in-process mode are unaffected.
+  dotted path that has no file on disk *without ever invoking PHP* — in proxy
+  mode every upstream's `/.well-known/jwks.json` (JWT verification!) silently
+  dies. `composer start`, `bin/start-stack.sh` and both supervisor confs pass the
+  router; keep it when adding a new run mode. The router serves real files
+  (`install.php`, `robots.txt`) as-is and routes everything else to `index.php`.
+  Apache (.htaccess) and in-process mode are unaffected.
 - **Env helper:** never `$_ENV[$key] ?? getenv($key) ?: $default` — `??`
   binds tighter than `?:` and clobbers falsy values. Use explicit `?? false`
-  (same bug that bit all four APIs).
+  (same bug that bit all the APIs).
 - **Bodies are buffered in memory** in *proxy* mode (cURL `POSTFIELDS` with the
   raw string). Fine for current upload sizes (blog covers, customer docs);
   revisit with streaming if large uploads land. In-process mode passes the PSR-7
@@ -117,7 +132,10 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
   load once and "first loaded wins" for the worker. Because the bundle is
   assembled from all repos at once with identical constraints the copies match —
   don't introduce a service that pins a divergent Slim/php-di/phpdotenv major.
-- **Don't make the four services depend on the gateway, or read env outside their
+  `frontend` composes its extensions via Composer `path` repos; the assemble
+  step mirrors (copies) them into its `vendor/` (`COMPOSER_MIRROR_PATH_REPOS=1`)
+  so the bundle ships no dangling symlinks.
+- **Don't make the services depend on the gateway, or read env outside their
   `Bootstrap`.** The in-process env scope only brackets `createApp`; an action
   reading `getenv()` at request time would escape it.
 - **The API surface is deliberately deindexed.** `Http\RobotsTagMiddleware`
@@ -130,8 +148,8 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
   `deploy/nginx.conf.example` mirrors the header (`add_header … always`) and
   serves the robots.txt inline. The middleware is a class, not a closure —
   Slim binds closure middleware to the DI container and `bindTo()` on a
-  static closure returns null. The four backends need nothing (the gateway
-  fronts them); this exists only at the front door.
+  static closure returns null. The backends need nothing (the gateway fronts
+  them); this exists only at the front door.
 
 ## Logging (`Support\Logger`)
 
@@ -167,34 +185,43 @@ caller workflows over a same-repo reusable `_assemble.yml` (`workflow_call`):
   `channel=release, deploy=true` → force-pushes **`release`** + pings
   `DEPLOY_WEBHOOK_URL`. The host pulls `release`.
 - `_assemble.yml`: `check` (validate + install + `php -l` + phpunit) then
-  `assemble` — checks out the gateway + all four API repos at `main`, runs
-  `composer install --no-dev` for each, **re-adds phinx per service**
-  (`composer require robmorgan/phinx:<require-dev constraint> --update-no-dev`)
-  so the host can migrate from the bundle without a composer install, assembles
-  `dist/` (gateway at root, services under `services/`, plus Procfile /
-  services.json / BUILD_INFO.json), and publishes to the `inputs.channel` branch
-  (deploy ping gated on `inputs.deploy`). PR merge-gate is the separate `ci.yml`.
+  `assemble` — checks out the gateway + `auth` + `customer` + `frontend`
+  (`tds-core-frontend-api`) **and the frontend's extension packages** (the
+  `tds-ext-*` repos its composer.json `path`-repos + `tds-frontend-contract-pkg`)
+  at `main`. It runs `composer install --no-dev` for gateway/auth/customer and
+  **re-adds phinx** for auth+customer (`composer require
+  robmorgan/phinx:<require-dev constraint> --update-no-dev`) so the host can
+  migrate from the bundle without a composer install. For `frontend` it runs
+  `COMPOSER_MIRROR_PATH_REPOS=1 composer update --no-dev` so the sibling
+  extension checkouts are **copied** (not symlinked) into `vendor/` — the bundle
+  stays self-contained — and it already carries phinx in `require`. Then it
+  assembles `dist/` (gateway at root, services under `services/{auth,customer,frontend}`,
+  plus Procfile / services.json / BUILD_INFO.json — the latter records the source
+  commit of each backend **and** each frontend extension) and publishes to the
+  `inputs.channel` branch (deploy ping gated on `inputs.deploy`). PR merge-gate is
+  the separate `ci.yml`.
 - `public/.htaccess` ships the Apache front-controller rewrite (same file as
-  the four APIs) so the gateway can run straight under PHP-FPM with the
-  docroot on `gateway/public` — the Plesk model in `DEPLOY-PLESK.md`. Without
-  it every route except `/` 404s on Apache hosts.
+  the APIs) so the gateway can run straight under PHP-FPM with the docroot on
+  `gateway/public` — the Plesk model in `DEPLOY-PLESK.md`. Without it every route
+  except `/` 404s on Apache hosts.
 
-### End-to-end wiring (gateway ↔ the four API repos)
+### End-to-end wiring (gateway ↔ the backend repos)
 
 The auto-reassembly loop spans two halves; both are live and verified.
 
-1. **API side** — each API repo (`tds-auth-api`, `tds-contact-api`,
-   `tds-content-api`, `tds-customer-api`) has its own
-   `dev.yml` / `release.yml` (+ `ci.yml` for PRs). Its **manual Release**
+1. **API side** — each backend repo (`tds-auth-api`, `tds-customer-api`) has its
+   own `dev.yml` / `release.yml` (+ `ci.yml` for PRs). Its **manual Release**
    (`release.yml`) pings `DEPLOY_WEBHOOK_URL` **and** POSTs an `api-pushed`
    `repository_dispatch` to this repo (`.../tds-api-gateway/dispatches`) using
    `GATEWAY_DISPATCH_TOKEN`. The dispatch step skips quietly (logs + `exit 0`)
-   when the token is unset, so a missing secret never reds the API's CI. The
-   four repos' workflows are identical except the PHP `extensions:` list
-   (auth: `openssl`; customer: `openssl, fileinfo`).
+   when the token is unset, so a missing secret never reds the API's CI.
+   (`tds-core-frontend-api` and its extension packages have their own release
+   flows; wiring an `api-pushed` dispatch from them into the gateway `dev`
+   reassembly is a follow-up — for now bump the gateway or press its Release to
+   pick up a new frontend/extension version.)
 2. **Gateway side** — the `repository_dispatch(api-pushed)` trigger fires
-   `dev.yml`, which rebuilds the **`dev`** bundle from all five repos at `main`.
-   So an API release ⇒ dispatch ⇒ gateway `dev` reassembles. The gateway's own
+   `dev.yml`, which rebuilds the **`dev`** bundle from every source repo at `main`.
+   So a backend release ⇒ dispatch ⇒ gateway `dev` reassembles. The gateway's own
    `release` is a separate manual button.
 
 To test the chain without an API push:
@@ -210,74 +237,74 @@ status (`-w '%{http_code}'`, `|| echo 000` for a connect failure) and emits a
 `::warning::` annotation on a non-2xx instead of exiting non-zero. So a broken
 webhook shows as a **yellow warning on a green run**, never a red build — check
 the run annotations, not the job status, to catch a dead deploy hook. The same
-softening is mirrored in all four API repos' `ci.yml`.
+softening is mirrored in the backend repos' `ci.yml`.
 
 ### Required secrets
 
 | Secret | Where | Purpose | Status |
 |---|---|---|---|
-| `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the private API repos **and** pushes the `dev`/`release` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
-| `GATEWAY_DISPATCH_TOKEN` | each of the 4 API repos | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set in all 4 |
-| `DEPLOY_WEBHOOK_URL` | this repo + each API repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | Wire to the host's deploy hook once its URL is known; while unset or misconfigured the ping just skips / warns and never reds the job. |
+| `ASSEMBLE_TOKEN` | this repo | org PAT (`repo` scope, SSO-authorized): checks out the backend + extension repos **and** pushes the `dev`/`release` branch (the peaceiris `github_token:` field — despite the name, *not* the default `GITHUB_TOKEN`). | set |
+| `GATEWAY_DISPATCH_TOKEN` | each backend repo | PAT that can POST `repository_dispatch` to this repo (the same org PAT as `ASSEMBLE_TOKEN` works). | set |
+| `DEPLOY_WEBHOOK_URL` | this repo + each backend repo | deploy hook the host pulls on; carries its own token. Optional — the step skips when unset and is non-fatal when set (see above). | Wire to the host's deploy hook once its URL is known; while unset or misconfigured the ping just skips / warns and never reds the job. |
 
 Gotcha: `actions/checkout` errors `Input required and not supplied: token`
 when `token:` is given but the secret resolves empty — it does **not** fall
 back to `GITHUB_TOKEN`. A missing `ASSEMBLE_TOKEN` therefore fails `assemble`
-at the first private-repo checkout while `check` stays green (no secrets
-needed). That asymmetric failure is the tell for an unset/expired token.
+at the first cross-repo checkout while `check` stays green (no secrets needed).
+That asymmetric failure is the tell for an unset/expired token.
 
-## API wiki (`/wiki`)
+## API wiki (moved out of the gateway)
 
-- `bin/gen-api-wiki.php` parses each service's `src/Bootstrap.php` (gateway +
-  the four APIs), extracting every Slim route — including grouped routes and
-  the auth middleware on them (`->add($admin)` → Admin-Token, the JWT group →
-  JWT). It writes `API-WIKI.md` + `wiki/index.html`. It auto-discovers the
-  Bootstrap files across the dev (`../tds-*-api`), bundle (`services/<name>`)
-  and CI (`_src/<name>`) layouts. **New routes appear automatically** — there
-  is no hand-maintained route list.
-- CI runs it in the `assemble` job (`php _src/gateway/bin/gen-api-wiki.php
-  dist`) so the bundle always ships a current `wiki/index.html` at its root.
-- `Action\WikiAction` serves `/wiki`, gated by `ADMIN_TOKEN` (the same shared
-  secret the backends use): accepts a Bearer header, a `?token=` query (which
-  it converts to a `tds_wiki` cookie + clean redirect), or the cookie. **Unset
-  `ADMIN_TOKEN` ⇒ the route is 404 (disabled)** — the wiki is never public.
-  It reads `wiki/index.html` from the gateway root (dev) or the bundle root
-  (prod). `/wiki` is registered before the catch-all so it isn't proxied.
-- `API-WIKI.md` is a committed snapshot for reading on GitHub; the live
-  `wiki/index.html` is a build artifact (gitignored, regenerated by CI).
+- The gateway **no longer serves the API wiki.** It is owned by the composed
+  frontend API — `tds-core-frontend-api`'s `GET /wiki.json` introspects every
+  enabled module's live Slim routes at request time (admin-gated via the JWT) —
+  and rendered by the admin frontend's Wiki page. `/wiki.json` reaches it through
+  the gateway's catch-all like any other frontend route; there is no
+  gateway-owned wiki route, generator (`gen-api-wiki.php`), or `wiki/` artifact
+  anymore. Adding a module route surfaces it automatically, no gateway change.
 
 ## Web installer (`public/install.php`)
 
 - Self-contained first-run setup wizard served as a plain file at
   `/install.php` (the `.htaccess` serves real files before the Slim
   front-controller, so it isn't proxied). It is **not** a Slim route — no
-  autoloader of its own; it shells out to each bundled `services/<name>/vendor/bin/phinx`
-  for migrations (via `proc_open`, with a manual-fallback message when that's
-  disabled) and uses `ext-openssl` directly for the auth keypair.
+  autoloader of its own; it drives the in-process Phinx migrator from each
+  bundled `services/<name>/vendor/` (subprocess phinx fallback when `proc_open`
+  is available) and uses `ext-openssl` directly for the auth keypair.
 - Path model: it lives at `<bundle>/gateway/public/install.php` and resolves
   `<bundle>/services/<name>` two levels up; shows a "bundle not assembled"
   guard when run outside the assembled bundle (e.g. the dev repo).
-- Writes `services/<name>/.env` (+ gateway `.env`) from the same templates as
-  the `.env.example`s / `deploy/docker-entrypoint.sh`; keep all three in sync
-  when a service gains an env var.
+- Writes `services/<name>/.env` (+ gateway `.env`) for **auth, customer, frontend**
+  from the same templates as the `.env.example`s / `deploy/docker-entrypoint.sh`;
+  keep all three in sync when a service gains an env var.
 - **Only installation-relevant secrets are set here.** Step 3 no longer collects
-  third-party service keys (Stripe, Resend email, GitHub blog-rebuild) — those are
-  configured at runtime in the admin frontend (Einrichtungsassistent / Einstellungen)
-  and stored encrypted in each service's `app_setting` table. The installer only
-  provisions a per-service `SETTINGS_ENCRYPTION_KEY` (auto-generated, like
-  `document_sign_secret`) that protects those runtime secrets — written into the
-  content/contact/customer `.env` blocks in `env_for()`.
+  third-party service keys (Stripe, DeepL, Lexware, GitHub blog-rebuild) — those
+  are configured at runtime in the admin frontend („Einstellungen“) and stored
+  encrypted per service in the `app_setting` table. The installer only provisions
+  a per-service `SETTINGS_ENCRYPTION_KEY` (auto-generated, like `document_sign_secret`)
+  that protects those runtime secrets — written into the customer/frontend `.env`
+  blocks in `env_for()`.
+- **Frontend migration is different.** auth + customer migrate via their bundled
+  phinx (`run_migration`). `frontend` (`tds-core-frontend-api`) has no single
+  `db/migrations` + `phinx.php` — it composes every enabled extension's migration
+  paths and applies them through its OWN in-process migrator (`migrate_frontend()`
+  requires the frontend `vendor/`, builds `Modules::migrationPaths()` +
+  `Support\MigrationRunner`, and verifies via a `phinxlog` count). It also
+  auto-migrates on the first request (`AUTO_MIGRATE=1`), so the installer step is
+  a head start, not the only path. All frontend extensions share one DB
+  (`tds_frontend`) and one `phinxlog`.
 - **Apply phase is a per-task AJAX driver, not one blocking POST.** Step 4 runs
   each install step (`install_tasks()` / `run_task()`: env writes → keypair →
-  dirs → the four phinx migrations → **create_admin** → finalize) as its own small
-  JSON request while a progress bar advances. This replaced the old "do everything in one
-  request" apply that appeared to hang (four serial migrations blew past
-  `max_execution_time`; `run_migration` blocked forever on `stream_get_contents`).
-  Now: tasks run with `set_time_limit(0)`, `run_migration` reads non-blocking
-  against a 120s deadline (`proc_terminate` on timeout), and the per-task guard
-  keys on the **`.tds-installed` lock only** (NOT `services/auth/.env`) — the
-  first task writes that `.env`, so an `$alreadyInstalled`-style guard there would
-  abort every later task. A `<noscript>` form keeps the single-request fallback.
+  dir → the migrations (auth, customer, frontend) → **create_admin** → finalize)
+  as its own small JSON request while a progress bar advances. This replaced the
+  old "do everything in one request" apply that appeared to hang (serial
+  migrations blew past `max_execution_time`; `run_migration` blocked forever on
+  `stream_get_contents`). Now: tasks run with `set_time_limit(0)`, `run_migration`
+  reads non-blocking against a 120s deadline (`proc_terminate` on timeout), and
+  the per-task guard keys on the **`.tds-installed` lock only** (NOT
+  `services/auth/.env`) — the first task writes that `.env`, so an
+  `$alreadyInstalled`-style guard there would abort every later task. A
+  `<noscript>` form keeps the single-request fallback.
 - **Admin login (step 3 config + `create_admin` task).** Step 3 collects the
   first admin's e-mail + password (defaults `admin@tracht-digital.de` /
   `tds-setup-admin`). The `create_admin` task runs *after* `migrate_auth` and
@@ -292,8 +319,8 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   (JS `donePanel` + no-JS step 5) print the login and the admin-frontend URL
   (`management.tracht-digital.de`).
 - **CORS default** lists `management.tracht-digital.de` (the admin frontend's current
-  address) alongside `admin.`/`app.`/blog/landing — keep it in sync with the four
-  services' `.env.example` `CORS_ALLOWED_ORIGINS`.
+  address) alongside `app.`/blog/landing — keep it in sync with the backends'
+  `CORS_ALLOWED_ORIGINS` (the gateway itself emits no CORS).
 - **Security:** refuses to run once a `.tds-installed` lock (bundle root) or
   `services/auth/.env` exists (wizard entry guard), and offers self-delete. It
   ships in every bundle and is an open setup endpoint **before** first install —
@@ -309,7 +336,12 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   `createApp()` (never *from* createApp — keeps the app pure for unit tests).
   In-process mode only (`GATEWAY_MODE=proxy` services own their migrations);
   toggle with `GATEWAY_AUTO_MIGRATE=0`. On the first request after a deploy it
-  applies each `services/<name>`'s pending migrations, then marks done.
+  applies each service's pending migrations, then marks done. **Only `auth` +
+  `customer`** are driven here (`Bootstrap::AUTO_MIGRATE_SERVICES`): `frontend`
+  has no single `db/migrations` + `phinx.php`, so it self-migrates through
+  `tds-core-frontend-api`'s own in-process migrator when its app is first built
+  (the dispatcher constructs its `Bootstrap::createApp`, which runs its
+  `AUTO_MIGRATE`).
 - **Migrations run *in-process* via Phinx's `Manager` API — not a subprocess.**
   Shared Plesk hosting routinely disables `proc_open`, which is exactly why the
   installer's shell-out to phinx silently applied nothing and left prod empty.
@@ -331,10 +363,12 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   PHP process, so two services declaring the same class is an **uncatchable**
   fatal redeclaration error on every request — three services shipping an
   identical `CreateAppSetting` took the whole API down. Convention: prefix the
-  class/filename with the service (`CreateContentAppSetting`, …). Defense:
-  `MigrationRunner` text-scans each service's declared migration classes before
-  running and **skips a colliding service with a logged error** (no marker →
-  health shows `db:no-schema`) instead of fataling.
+  class/filename with the service/extension. Defense: `MigrationRunner`
+  text-scans each service's declared migration classes before running and
+  **skips a colliding service with a logged error** (no marker → health shows
+  `db:no-schema`) instead of fataling. (The same rule holds *within* `frontend`:
+  its extensions share one `phinxlog`, enforced by `tds-core-frontend-api`'s own
+  runner — see that repo.)
 - **CLI-php resolution (subprocess fallback + install.php only):** under PHP-FPM
   `PHP_BINARY` is the FPM binary and can't run phinx (a prime suspect for
   "installer said OK but the DB is empty"). `MigrationRunner::phpCliBinary()`
@@ -354,6 +388,9 @@ PHPUnit 10, no DB, no network. Proxy mode fakes `Http\ProxyClientInterface`
 (`tests/Support/FakeProxyClient`); in-process mode injects a fake app-resolver +
 temp `.env` into `InProcessDispatcher` (`tests/Dispatch/InProcessDispatcherTest`
 covers env isolation, path rewrite, 404, 502; `DispatchActionTest` /
-`InProcessHealthActionTest` cover the actions). `composer test` runs the suite
-(`WikiActionTest` covers the wiki auth gate). The installer is a standalone
-script (no unit tests); validate it with `php -l` + a built-in-server smoke.
+`InProcessHealthActionTest` cover the actions). `ServiceRegistryTest` /
+`ProxyActionTest` / `DispatchActionTest` cover the **default (catch-all)
+routing** — an unmatched path routing to `frontend` verbatim, and a 404 only when
+`GATEWAY_DEFAULT_SERVICE` is disabled. `composer test` runs the suite. The
+installer is a standalone script (no unit tests); validate it with `php -l` + a
+built-in-server smoke.

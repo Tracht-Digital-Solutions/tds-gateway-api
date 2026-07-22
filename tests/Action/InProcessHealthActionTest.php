@@ -46,7 +46,7 @@ final class InProcessHealthActionTest extends TestCase
     public function testAllHealthyReturns200(): void
     {
         $dispatcher = $this->dispatcherWith([
-            'auth' => '200', 'contact' => '200', 'content' => '200', 'customer' => '200',
+            'auth' => '200', 'customer' => '200', 'frontend' => '200',
         ]);
         $action = new InProcessHealthAction($this->registry(), $dispatcher);
         $request = (new ServerRequestFactory())->createServerRequest('GET', 'https://api/healthz');
@@ -55,13 +55,13 @@ final class InProcessHealthActionTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertTrue($body['ok']);
-        self::assertCount(4, $body['services']);
+        self::assertCount(3, $body['services']);
     }
 
     public function testOneUnhealthyReturns503(): void
     {
         $dispatcher = $this->dispatcherWith([
-            'auth' => '200', 'contact' => '500', 'content' => '200', 'customer' => '200',
+            'auth' => '200', 'customer' => '200', 'frontend' => '500',
         ]);
         $action = new InProcessHealthAction($this->registry(), $dispatcher);
         $request = (new ServerRequestFactory())->createServerRequest('GET', 'https://api/healthz');
@@ -70,15 +70,15 @@ final class InProcessHealthActionTest extends TestCase
         self::assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertFalse($body['ok']);
-        self::assertFalse($body['services']['/contact']['ok']);
-        self::assertSame(500, $body['services']['/contact']['status']);
+        self::assertFalse($body['services']['/frontend']['ok']);
+        self::assertSame(500, $body['services']['/frontend']['status']);
         self::assertTrue($body['services']['/auth']['ok']);
     }
 
     public function testBootFailureCountsAsStatusZero(): void
     {
         $dispatcher = $this->dispatcherWith([
-            'auth' => '200', 'contact' => 'THROW', 'content' => '200', 'customer' => '200',
+            'auth' => '200', 'customer' => '200', 'frontend' => 'THROW',
         ]);
         $action = new InProcessHealthAction($this->registry(), $dispatcher);
         $request = (new ServerRequestFactory())->createServerRequest('GET', 'https://api/healthz');
@@ -86,7 +86,7 @@ final class InProcessHealthActionTest extends TestCase
 
         self::assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
-        self::assertSame(0, $body['services']['/contact']['status']);
-        self::assertCount(4, $body['services']);
+        self::assertSame(0, $body['services']['/frontend']['status']);
+        self::assertCount(3, $body['services']);
     }
 }

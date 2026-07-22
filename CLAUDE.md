@@ -15,11 +15,12 @@ first path segment to the backend services. By default (`GATEWAY_MODE=inprocess`
 each backend **in-process** in one PHP-FPM app; `GATEWAY_MODE=proxy` relays over HTTP to
 loopback `php -S` services instead.
 
-- **Both architectures depend on it.** Today it fronts the legacy services (`auth`,
-  `customer`, and the archived `content`/`contact` code still deployed until cutover);
-  after the frontend-platform cutover it must route to `tds-core-frontend-api` + `tds-auth-api`.
+- **It fronts three backends (post frontend-platform cutover):** `auth` →
+  `tds-auth-api` (`/auth/*`), `customer` → `tds-customer-api` (`/customer/*`), and
+  `frontend` → `tds-core-frontend-api` as the **default catch-all** (everything else) —
+  the composed base + extensions that replaced the archived `content`/`contact` backends.
 - **CORS is owned by each upstream**, never added at the gateway (it would duplicate the
-  header).
+  header). The internal API wiki lives in the frontend API (`/wiki.json`), not the gateway.
 - **The `env()` `?? false` precedence rule and the "CORS after `addRoutingMiddleware()`"
   LIFO rule apply here too** — see the root `CLAUDE.md` "Cross-cutting conventions".
 

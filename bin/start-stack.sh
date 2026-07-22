@@ -1,19 +1,18 @@
 #!/bin/sh
-# start-stack.sh — bring the four TDS micro-backends up behind the gateway.
+# start-stack.sh — bring the TDS micro-backends up behind the gateway.
 #
 # Run this once the gateway bundle is deployed/installed on a host: it starts
-# the auth/contact/content/customer service processes (and, optionally, the
-# gateway itself) on the loopback ports the gateway proxies to. It is
-# idempotent — a service that is already listening is left alone — so it is
-# safe to wire into a @reboot cron and a 5-minute watchdog cron.
+# the auth/customer/frontend service processes (and, optionally, the gateway
+# itself) on the loopback ports the gateway proxies to. It is idempotent — a
+# service that is already listening is left alone — so it is safe to wire into
+# a @reboot cron and a 5-minute watchdog cron.
 #
 # Layout it expects (the assembled `build` bundle):
 #
-#   <bundle>/gateway/public        ← Slim proxy           (:8000, optional here)
-#   <bundle>/services/auth/public  ← tds-auth-api          (:8003)
-#   <bundle>/services/contact/...  ← tds-contact-api       (:8002)
-#   <bundle>/services/content/...  ← tds-content-api       (:8001)
-#   <bundle>/services/customer/... ← tds-customer-api      (:8004)
+#   <bundle>/gateway/public        ← Slim proxy              (:8000, optional here)
+#   <bundle>/services/auth/public  ← tds-auth-api             (:8003)
+#   <bundle>/services/customer/... ← tds-customer-api         (:8004)
+#   <bundle>/services/frontend/... ← tds-core-frontend-api    (:8100, default route)
 #
 # This script lives at <bundle>/gateway/bin/start-stack.sh, so it derives the
 # bundle root from its own location. Override any of the knobs below via env.
@@ -44,7 +43,7 @@ RUN_MIGRATIONS=${RUN_MIGRATIONS:-0}
 mkdir -p "$TDS_LOG_DIR"
 
 # name:port — the contract with the gateway's *_UPSTREAM defaults.
-SERVICES="auth:8003 contact:8002 content:8001 customer:8004"
+SERVICES="auth:8003 customer:8004 frontend:8100"
 
 log() { echo "[start-stack] $*"; }
 
@@ -93,8 +92,8 @@ if [ "$START_GATEWAY" = "1" ]; then
     log "gateway already listening on 127.0.0.1:8000 — leaving it."
   else
     log "Starting gateway on 0.0.0.0:8000…"
-    # See the notes above: portable nohup-free detach + router.php (the
-    # gateway serves /wiki.json, which php -S would otherwise 404).
+    # See the notes above: portable nohup-free detach + router.php (dotted
+    # upstream paths like /.well-known/jwks.json would otherwise 404 under php -S).
     ( trap '' HUP; exec "$PHP_BIN" -S "0.0.0.0:8000" -t "$GATEWAY_DIR/public" "$GATEWAY_DIR/public/router.php" \
       >>"$TDS_LOG_DIR/tds-gateway.log" 2>&1 </dev/null ) &
   fi

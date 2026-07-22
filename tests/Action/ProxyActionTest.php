@@ -21,6 +21,15 @@ final class ProxyActionTest extends TestCase
         );
     }
 
+    /** Registry with the catch-all disabled, so an unmatched path 404s. */
+    private function registryNoDefault(): ServiceRegistry
+    {
+        return ServiceRegistry::fromEnv(
+            static fn (string $key, ?string $default = null): string =>
+                $key === 'GATEWAY_DEFAULT_SERVICE' ? '' : (string) $default,
+        );
+    }
+
     public function testForwardsToCorrectUpstreamWithBodyAndQuery(): void
     {
         $client = new FakeProxyClient(new ProxyResponse(201, ['Content-Type' => ['application/json']], '{"ok":true}'));
@@ -57,7 +66,7 @@ final class ProxyActionTest extends TestCase
         $action = new ProxyAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
-            ->createServerRequest('GET', 'https://api.tracht-digital.de/content/blog');
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/blogs/x');
         $response = $action($request, new Response());
 
         self::assertSame(['a=1', 'b=2'], $response->getHeader('Set-Cookie'));
@@ -65,10 +74,10 @@ final class ProxyActionTest extends TestCase
         self::assertSame('hello', (string) $response->getBody());
     }
 
-    public function testUnknownServiceReturns404(): void
+    public function testUnknownServiceReturns404WhenNoDefault(): void
     {
         $client = new FakeProxyClient();
-        $action = new ProxyAction($this->registry(), $client);
+        $action = new ProxyAction($this->registryNoDefault(), $client);
 
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', 'https://api.tracht-digital.de/nope/x');
@@ -76,6 +85,20 @@ final class ProxyActionTest extends TestCase
 
         self::assertSame(404, $response->getStatusCode());
         self::assertSame(0, $client->calls);
+    }
+
+    public function testUnmatchedPathProxiesToDefaultVerbatim(): void
+    {
+        $client = new FakeProxyClient(new ProxyResponse(200, [], 'ok'));
+        $action = new ProxyAction($this->registry(), $client);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/tools/catalog?x=1');
+        $action($request, new Response());
+
+        // Falls through to `frontend` (:8100) with the path unchanged.
+        self::assertSame('http://127.0.0.1:8100/tools/catalog?x=1', $client->url);
+        self::assertSame(['/frontend'], $client->headers['X-Forwarded-Prefix']);
     }
 
     public function testUpstreamFailureReturns502(): void
@@ -99,15 +122,15 @@ final class ProxyActionTest extends TestCase
         $action = new ProxyAction($this->registry(), $client, new Logger($logPath, 'info'));
 
         $request = (new ServerRequestFactory())
-            ->createServerRequest('GET', 'https://api.tracht-digital.de/content/blog');
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/blogs/x');
         $response = $action($request, new Response());
 
         self::assertSame(502, $response->getStatusCode());
         self::assertFileExists($logPath);
         $entry = json_decode(trim((string) file_get_contents($logPath)), true);
         self::assertSame('error', $entry['level']);
-        self::assertSame('/content', $entry['service']);
-        self::assertSame('http://127.0.0.1:8001/blog', $entry['target']);
+        self::assertSame('/frontend', $entry['service']);
+        self::assertSame('http://127.0.0.1:8100/blogs/x', $entry['target']);
         self::assertArrayHasKey('curl_errno', $entry);
 
         @unlink($logPath);
@@ -119,11 +142,11 @@ final class ProxyActionTest extends TestCase
         $action = new ProxyAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
-            ->createServerRequest('OPTIONS', 'https://api.tracht-digital.de/contact');
+            ->createServerRequest('OPTIONS', 'https://api.tracht-digital.de/tickets');
         $response = $action($request, new Response());
 
         self::assertSame('OPTIONS', $client->method);
-        self::assertSame('http://127.0.0.1:8002/contact', $client->url);
+        self::assertSame('http://127.0.0.1:8100/tickets', $client->url);
         self::assertSame(204, $response->getStatusCode());
         // CORS headers from the upstream are mirrored, not synthesised here.
         self::assertSame(['*'], $response->getHeader('Access-Control-Allow-Origin'));
@@ -140,7 +163,7 @@ final class ProxyActionTest extends TestCase
         $action = new ProxyAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
-            ->createServerRequest('GET', 'https://api.tracht-digital.de/content/blog');
+            ->createServerRequest('GET', 'https://api.tracht-digital.de/blogs/x');
         $response = $action($request, new Response());
 
         // The compressed bytes pass through untouched; Content-Length is dropped

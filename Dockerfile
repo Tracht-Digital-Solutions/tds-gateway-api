@@ -1,18 +1,28 @@
 # syntax=docker/dockerfile:1.7
 #
 # One image that runs the whole TDS API surface: the Slim gateway on :8000
-# plus the four micro-backends on their loopback ports, supervised together.
+# plus the backends (auth, customer, and the composed frontend API) on their
+# loopback ports, supervised together.
 #
-# The gateway repo is the default build context. The four service repos are
-# pulled in as *named build contexts* (BuildKit) so a single Dockerfile can
-# assemble all five from the side-by-side checkout — exactly what CI does for
-# the `build` branch, but locally and without a token:
+# The gateway repo is the default build context. The service repos — and the
+# frontend's extension packages — are pulled in as *named build contexts*
+# (BuildKit) so a single Dockerfile can assemble them all from the side-by-side
+# checkout, exactly what CI does for the `build` branch, but locally and
+# without a token:
 #
 #   docker build \
 #     --build-context auth=../tds-auth-api \
-#     --build-context contact=../tds-contact-api \
-#     --build-context content=../tds-content-api \
 #     --build-context customer=../tds-customer-api \
+#     --build-context frontend=../tds-core-frontend-api \
+#     --build-context contract=../tds-frontend-contract-pkg \
+#     --build-context ext_time_tracker=../tds-ext-time-tracker-pkg \
+#     --build-context ext_customers=../tds-ext-customers-pkg \
+#     --build-context ext_billing=../tds-ext-billing-pkg \
+#     --build-context ext_lexware=../tds-ext-lexware-pkg \
+#     --build-context ext_tools=../tds-ext-tools-pkg \
+#     --build-context ext_messages=../tds-ext-messages-pkg \
+#     --build-context ext_projects=../tds-ext-projects-pkg \
+#     --build-context ext_documents=../tds-ext-documents-pkg \
 #     -t tds-api .
 #
 # `docker compose up` wires those contexts for you (see docker-compose.yml).
@@ -25,26 +35,43 @@ FROM composer:2 AS vendor
 WORKDIR /build
 COPY . ./gateway/
 COPY --from=auth     . ./auth/
-COPY --from=contact  . ./contact/
-COPY --from=content  . ./content/
 COPY --from=customer . ./customer/
+COPY --from=frontend . ./frontend/
+# frontend's Composer `path` repos resolve to these siblings of /build/frontend
+# (../tds-frontend-contract-pkg + ../tds-ext-*). Keep the directory names EXACTLY
+# as referenced in tds-core-frontend-api/composer.json.
+COPY --from=contract         . ./tds-frontend-contract-pkg/
+COPY --from=ext_time_tracker . ./tds-ext-time-tracker-pkg/
+COPY --from=ext_customers    . ./tds-ext-customers-pkg/
+COPY --from=ext_billing      . ./tds-ext-billing-pkg/
+COPY --from=ext_lexware      . ./tds-ext-lexware-pkg/
+COPY --from=ext_tools        . ./tds-ext-tools-pkg/
+COPY --from=ext_messages     . ./tds-ext-messages-pkg/
+COPY --from=ext_projects     . ./tds-ext-projects-pkg/
+COPY --from=ext_documents    . ./tds-ext-documents-pkg/
 
-# Prod deps for every piece. Then re-add phinx for the four services (they
-# keep it in require-dev, but the running container needs the migration
-# runner) — same trick the assemble workflow uses for the build bundle.
+# Prod deps for the gateway + the two prefixed backends, then re-add phinx for
+# those two (they keep it in require-dev, but the running container needs the
+# migration runner). frontend composes its extensions via path repos: mirror
+# (copy, don't symlink) them into vendor/ so the image is self-contained, and
+# `composer update` so the tips of the sibling checkouts win over the lock. It
+# already carries phinx in `require`.
 RUN set -eux; \
-    for d in gateway auth contact content customer; do \
+    for d in gateway auth customer; do \
       rm -rf "/build/$d/vendor" "/build/$d/.git"; \
       composer install --working-dir="/build/$d" \
         --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader; \
     done; \
-    for d in auth contact content customer; do \
+    for d in auth customer; do \
       c=$(php -r '$j=json_decode(file_get_contents($argv[1]),true); echo $j["require-dev"]["robmorgan/phinx"] ?? "";' "/build/$d/composer.json"); \
       if [ -n "$c" ]; then \
         composer require "robmorgan/phinx:$c" --working-dir="/build/$d" \
           --no-interaction --no-progress --update-no-dev --optimize-autoloader; \
       fi; \
-    done
+    done; \
+    rm -rf /build/frontend/vendor /build/frontend/.git; \
+    COMPOSER_MIRROR_PATH_REPOS=1 composer update --working-dir="/build/frontend" \
+      --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
 
 ##########################
 # Stage 2 — the runtime  #
@@ -66,15 +93,14 @@ WORKDIR /srv/tds
 
 COPY --from=vendor /build/gateway/  ./gateway/
 COPY --from=vendor /build/auth/     ./services/auth/
-COPY --from=vendor /build/contact/  ./services/contact/
-COPY --from=vendor /build/content/  ./services/content/
 COPY --from=vendor /build/customer/ ./services/customer/
+COPY --from=vendor /build/frontend/ ./services/frontend/
 
 COPY deploy/supervisord.docker.conf /etc/supervisor/conf.d/tds.conf
 COPY deploy/docker-entrypoint.sh    /usr/local/bin/tds-entrypoint
 RUN chmod +x /usr/local/bin/tds-entrypoint
 
-# Only the gateway is published; the four services stay on the loopback.
+# Only the gateway is published; the backends stay on the loopback.
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/tds-entrypoint"]

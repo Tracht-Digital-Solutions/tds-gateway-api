@@ -1,8 +1,10 @@
-# INSTALL — Gateway + die vier APIs zusammen betreiben
+# INSTALL — Gateway + die Backends zusammen betreiben
 
 Diese Anleitung beschreibt, wie aus einem **manuell deployten Gateway-Bundle**
-die vier Micro-Backends (`auth`, `contact`, `content`, `customer`) mitlaufen.
-Sobald du das Bundle ausgecheckt und einmal eingerichtet hast, startet
+die Backends (`auth`, `customer`, `frontend`) mitlaufen. `frontend` ist
+`tds-core-frontend-api` — die komponierte Basis + Extensions, die die
+archivierten `content`/`contact`-Backends ersetzt hat, und die Default-Route des
+Gateways. Sobald du das Bundle ausgecheckt und einmal eingerichtet hast, startet
 `bin/start-stack.sh` alle Service-Prozesse hinter dem Gateway.
 
 > Für die Container-Variante (ein Befehl, alles läuft) siehe
@@ -20,10 +22,9 @@ Version, `release` (manueller Knopf) ist das, was der Host zieht:
 gateway/                ← Slim-Proxy (Docroot: gateway/public, Port 8000)
 gateway/bin/start-stack.sh
 gateway/bin/migrate-stack.sh
-services/auth/          ← tds-auth-api     (127.0.0.1:8003)
-services/contact/       ← tds-contact-api  (127.0.0.1:8002)
-services/content/       ← tds-content-api  (127.0.0.1:8001)
-services/customer/      ← tds-customer-api (127.0.0.1:8004)
+services/auth/          ← tds-auth-api          (127.0.0.1:8003)
+services/customer/      ← tds-customer-api      (127.0.0.1:8004)
+services/frontend/      ← tds-core-frontend-api (127.0.0.1:8100, Default-Route)
 Procfile, services.json, BUILD_INFO.json
 ```
 
@@ -56,49 +57,61 @@ Jeder Service liest seine DB-Zugangsdaten und Secrets aus
 `services/<name>/.env`. Vorlage ist jeweils `services/<name>/.env.example`:
 
 ```bash
-for name in auth contact content customer; do
+for name in auth customer frontend; do
   cp "services/$name/.env.example" "services/$name/.env"
   $EDITOR "services/$name/.env"     # DB-Creds + Secrets eintragen
 done
 ```
 
-Wichtig je Service (Details im `INSTALL.md` des jeweiligen API-Repos):
+Wichtig je Service (Details im `INSTALL.md`/`README.md` des jeweiligen Repos):
 
 - **auth** — DB; `ADMIN_TOKEN`; JWT. Entweder `JWT_PRIVATE_KEY` in die `.env`
   oder `services/auth/keys/private.pem` ablegen (Rechte `600`).
-- **contact** — DB (Rate-Limit); `RESEND_API_KEY`.
-- **content** — DB; `ADMIN_TOKEN` (muss zu auth/customer passen).
-- **customer** — DB; `ADMIN_TOKEN`; Stripe-Keys; `DOCUMENT_SIGN_SECRET`.
+- **customer** — DB; `ADMIN_TOKEN`; `SETTINGS_ENCRYPTION_KEY`;
+  `DOCUMENT_SIGN_SECRET`.
+- **frontend** (`tds-core-frontend-api`) — DB (`tds_frontend`, alle Extensions
+  teilen sie); `AUTH_API_URL`; `SETTINGS_ENCRYPTION_KEY`; optional `MAIL_DSN`;
+  `DOCUMENT_ROOT_DIR`/`DOCUMENT_SIGN_SECRET` (documents-Extension).
+
+Drittanbieter-Keys (Stripe, DeepL, Lexware, GitHub-Rebuild) kommen **nicht** in
+die `.env`, sondern zur Laufzeit ins Admin-Frontend („Einstellungen“,
+verschlüsselt in `app_setting`).
 
 Das **Gateway** braucht nur dann eine `.env`, wenn die Service-Ports von den
-`*_UPSTREAM`-Defaults (`127.0.0.1:800x`) abweichen — oder wenn das interne
-`/wiki` aktiv sein soll: dann `ADMIN_TOKEN` setzen (gleicher Admin-Token wie
-die Backends; ohne ihn ist `/wiki` deaktiviert, 404).
+`*_UPSTREAM`-Defaults abweichen (`auth` :8003, `customer` :8004, `frontend`
+:8100) oder `GATEWAY_DEFAULT_SERVICE`/`GATEWAY_SERVICES` überschrieben werden
+sollen. Eigene Secrets hat das Gateway keine.
 
 ## 3. Datenbanken + Migrationen
 
 Pro Service eine MariaDB-Datenbank + User anlegen (Namen müssen zur jeweiligen
-`.env` passen — Defaults: `tds_auth`, `tds_contact_ratelimit`, `tds_content`,
-`tds_customer`). Dann aus dem Bundle migrieren:
+`.env` passen — Defaults: `tds_auth`, `tds_customer`, `tds_frontend`). Dann aus
+dem Bundle migrieren:
 
 ```bash
-bin/migrate-stack.sh          # ruft phinx migrate -e production für alle vier auf
+bin/migrate-stack.sh          # phinx migrate -e production für auth + customer
 ```
+
+`frontend` wird **nicht** von `migrate-stack.sh` migriert: `tds-core-frontend-api`
+hat keine einzelne `db/migrations` + `phinx.php`, sondern komponiert die
+Migrationen aller aktivierten Extensions und wendet sie über seinen **eigenen**
+In-Process-Migrator beim ersten Request an (`AUTO_MIGRATE=1`; der Web-Installer
+stößt ihn zusätzlich einmal an).
 
 ## 4. Services starten
 
 > **Einfacher Weg auf einem PHP-FPM-Host:** Im Standardmodus
-> `GATEWAY_MODE=inprocess` bedient das Gateway alle vier APIs im eigenen
+> `GATEWAY_MODE=inprocess` bedient das Gateway alle Backends im eigenen
 > FPM-Prozess — dann ist dieser Abschnitt **überflüssig** (nichts zu starten),
 > es genügt Abschnitt 5 (Docroot auf `gateway/public`). Die folgenden
 > Service-Prozesse braucht nur der **Proxy-Modus** (`GATEWAY_MODE=proxy`), z. B.
 > hinter nginx ohne FPM.
 
-`bin/start-stack.sh` startet die vier Service-Prozesse **idempotent** (ein
-schon laufender Service wird nicht doppelt gestartet):
+`bin/start-stack.sh` startet die Service-Prozesse **idempotent** (ein schon
+laufender Service wird nicht doppelt gestartet):
 
 ```bash
-# Standard: die vier Services starten; das Gateway liefert der Webserver aus.
+# Standard: die Services starten; das Gateway liefert der Webserver aus.
 bin/start-stack.sh
 
 # Falls du auch das Gateway als eigenen PHP-Prozess auf :8000 willst:
@@ -134,19 +147,20 @@ fehlende Prozesse):
 Drei Modelle (eines wählen):
 
 1. **Gateway unter PHP-FPM** (Plesk-Stil): Docroot auf `gateway/public`, nur
-   die vier Service-Prozesse laufen (kein `START_GATEWAY`). Das mitgelieferte
+   die Service-Prozesse laufen (kein `START_GATEWAY`). Das mitgelieferte
    `gateway/public/.htaccess` macht das Front-Controller-Rewrite.
 2. **Gateway als Prozess:** `START_GATEWAY=1`, Webserver/Reverse-Proxy zeigt
    auf `127.0.0.1:8000`.
-3. **Nur nginx (kein PHP-Hop):** `deploy/nginx.conf.example` routet direkt zu
-   den vier Ports; das Gateway selbst läuft dann nicht.
+3. **Nur nginx (kein PHP-Hop):** `deploy/nginx.conf.example` routet `/auth` +
+   `/customer` zu ihren Ports und alles andere zu `:8100` (frontend); das
+   Gateway selbst läuft dann nicht.
 
 ## 6. Prüfen
 
 ```bash
-curl http://localhost:8000/             # Prefix-Navigation (Gateway lebt)
-curl http://localhost:8000/healthz      # aggregierte Health aller vier Services
-curl http://localhost:8000/content/blog # → content-api
+curl http://localhost:8000/              # Prefix-Navigation (Gateway lebt)
+curl http://localhost:8000/healthz       # aggregierte Health aller Services
+curl http://localhost:8000/tools/catalog # → frontend (Default-Route)
 ```
 
 `/healthz` meldet `503`, sobald ein Service nicht erreichbar ist — der
@@ -154,16 +168,16 @@ fehlende `php -S`-Prozess steht dann im Watchdog-Log.
 
 ## 7. Updates / Deploy-Webhook
 
-CI baut den `dev`-Branch nach jedem `main`-Push (Gateway **oder** eine der vier
-APIs, per `api-pushed`-Dispatch) automatisch — ohne Deploy. Der `release`-Branch
-wird **nur per manuellem Actions-Knopf** gebaut und pingt dann
-`DEPLOY_WEBHOOK_URL`. Der Host zieht `release` und muss darauf
-`git pull` + `bin/migrate-stack.sh` + Service-Neustart ausführen, z. B.:
+CI baut den `dev`-Branch nach jedem `main`-Push (Gateway **oder** ein Backend
+per `api-pushed`-Dispatch) automatisch — ohne Deploy. Der `release`-Branch wird
+**nur per manuellem Actions-Knopf** gebaut und pingt dann `DEPLOY_WEBHOOK_URL`.
+Der Host zieht `release` und muss darauf `git pull` + `bin/migrate-stack.sh` +
+Service-Neustart ausführen, z. B.:
 
 ```bash
 cd /srv/tds && git pull --ff-only
 bin/migrate-stack.sh
-pkill -f 'php -S 127.0.0.1:800' || true
+pkill -f 'php -S 127.0.0.1:81' -f 'php -S 127.0.0.1:800' || true
 bin/start-stack.sh
 ```
 

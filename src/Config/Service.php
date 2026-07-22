@@ -6,12 +6,20 @@ namespace Tds\ApiGateway\Config;
 /**
  * One upstream micro-backend behind the gateway.
  *
- * The public contract is path-prefixed: `api.tracht-digital.de/{prefix}/...`.
+ * Two routing shapes:
+ *  - **Prefixed** (`auth`, `customer`): the public contract is
+ *    `api.tracht-digital.de/{prefix}/...`; the first path segment selects the
+ *    service and is stripped before forwarding (`/auth/admin/login` →
+ *    auth-api's `/admin/login`).
+ *  - **Default / catch-all** (`isDefault`): the composed frontend API
+ *    (`tds-core-frontend-api`) owns the whole root namespace except the
+ *    prefixed services above. Anything that doesn't match a prefix is forwarded
+ *    to it verbatim (no segment stripped) — its module routes live at root
+ *    (`/tickets`, `/tools`, `/admin/settings`, `/me/…`, `/wiki.json`, …).
+ *
  * `upstream` is the internal base URL (host:port) the service listens on.
- * `rewrite` is prepended to the remainder after the prefix is stripped — it
- * is empty for services that mount their routes at root (auth, content,
- * customer) and `/contact` for contact-api, whose own route is literally
- * `/contact` (the frontend POSTs to `.../contact` with no sub-path).
+ * `rewrite` is prepended to the remainder after the prefix is stripped — it is
+ * empty for every current service (all mount their routes at root).
  */
 final class Service
 {
@@ -20,6 +28,7 @@ final class Service
         public readonly string $prefix,
         public readonly string $upstream,
         public readonly string $rewrite = '',
+        public readonly bool $isDefault = false,
     ) {
     }
 
@@ -45,8 +54,8 @@ final class Service
      * the query rides along on the forwarded request's URI).
      *
      * `auth` + `/admin/login` -> `/admin/login`
-     * `contact` (rewrite `/contact`) + `''` -> `/contact`
-     * `content` + `''` -> `/`  (a bare prefix hit maps to the service root)
+     * `customer` + `''` -> `/`  (a bare prefix hit maps to the service root)
+     * `frontend` (default) + `/tools/catalog` -> `/tools/catalog`
      */
     public function pathFor(string $remainder): string
     {

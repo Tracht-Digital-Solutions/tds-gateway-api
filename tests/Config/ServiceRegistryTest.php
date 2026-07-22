@@ -25,41 +25,55 @@ final class ServiceRegistryTest extends TestCase
         self::assertSame('/admin/login', $remainder);
     }
 
-    public function testContactRewriteKeepsItsOwnPath(): void
+    public function testUnmatchedPathFallsThroughToDefaultVerbatim(): void
     {
+        // The composed frontend API (`frontend`) is the default upstream: a path
+        // that matches no prefix is forwarded whole, nothing stripped.
         $registry = ServiceRegistry::fromEnv($this->defaultEnv());
 
-        $match = $registry->match('/contact');
+        $match = $registry->match('/tools/catalog');
         self::assertNotNull($match);
         [$service, $remainder] = $match;
-        self::assertSame('contact', $service->prefix);
-        self::assertSame('', $remainder);
-        // The frontend POSTs to .../contact and contact-api's route is /contact.
-        self::assertSame('http://127.0.0.1:8002/contact', $service->targetFor($remainder));
+        self::assertSame('frontend', $service->prefix);
+        self::assertTrue($service->isDefault);
+        self::assertSame('/tools/catalog', $remainder);
+        self::assertSame('http://127.0.0.1:8100/tools/catalog', $service->targetFor($remainder));
     }
 
-    public function testRootServiceTargetStripsPrefix(): void
+    public function testRootPathMapsToDefaultRoot(): void
     {
         $registry = ServiceRegistry::fromEnv($this->defaultEnv());
-        [$service, $remainder] = $registry->match('/content/blog');
+        $match = $registry->match('/');
+        self::assertNotNull($match);
+        [$service, $remainder] = $match;
+        self::assertSame('frontend', $service->prefix);
+        self::assertSame('/', $remainder);
+    }
 
-        self::assertSame('http://127.0.0.1:8001/blog', $service->targetFor($remainder));
+    public function testCustomerRootServiceTargetStripsPrefix(): void
+    {
+        $registry = ServiceRegistry::fromEnv($this->defaultEnv());
+        [$service, $remainder] = $registry->match('/customer/projects');
+
+        self::assertSame('http://127.0.0.1:8004/projects', $service->targetFor($remainder));
     }
 
     public function testQueryStringIsAppended(): void
     {
         $registry = ServiceRegistry::fromEnv($this->defaultEnv());
-        [$service, $remainder] = $registry->match('/content/blog');
+        [$service, $remainder] = $registry->match('/customer/projects');
 
         self::assertSame(
-            'http://127.0.0.1:8001/blog?tag=astro',
+            'http://127.0.0.1:8004/projects?tag=astro',
             $service->targetFor($remainder, 'tag=astro'),
         );
     }
 
-    public function testUnknownPrefixReturnsNull(): void
+    public function testUnknownPrefixReturnsNullWhenDefaultDisabled(): void
     {
-        $registry = ServiceRegistry::fromEnv($this->defaultEnv());
+        $env = static fn (string $key, ?string $default = null): string =>
+            $key === 'GATEWAY_DEFAULT_SERVICE' ? '' : (string) $default;
+        $registry = ServiceRegistry::fromEnv($env);
         self::assertNull($registry->match('/nope/here'));
         self::assertNull($registry->match('/'));
     }
@@ -81,7 +95,9 @@ final class ServiceRegistryTest extends TestCase
     public function testHealthUrlAlwaysHitsUpstreamRoot(): void
     {
         $registry = ServiceRegistry::fromEnv($this->defaultEnv());
-        self::assertSame('http://127.0.0.1:8002/healthz', $registry->get('contact')->healthUrl());
+        self::assertSame('http://127.0.0.1:8004/healthz', $registry->get('customer')->healthUrl());
+        // get() resolves the default service by name too.
+        self::assertSame('http://127.0.0.1:8100/healthz', $registry->get('frontend')->healthUrl());
     }
 
     public function testCustomServiceWithoutUpstreamThrows(): void

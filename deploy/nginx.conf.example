@@ -2,8 +2,9 @@
 # directly to the upstream ports. Use this OR the PHP gateway, not both.
 #
 # Trailing-slash semantics: `location /auth/ { proxy_pass http://...:8003/; }`
-# strips the /auth prefix (the upstream sees /admin/login). contact-api keeps
-# its own /contact path, so it is mapped without stripping.
+# strips the /auth prefix (the upstream sees /admin/login). Everything not under
+# /auth or /customer is the composed frontend API's — proxied to :8100 verbatim
+# (no prefix, its module routes live at root).
 
 server {
     listen 80;
@@ -30,25 +31,19 @@ server {
         proxy_pass http://127.0.0.1:8003/;
     }
 
-    location /content/ {
-        # Everything under /content/ — including /content/uploads/{slug}/{file}
-        # (blog cover/body images) — MUST proxy to the PHP upstream. Do NOT add a
-        # static `location /content/uploads/ { alias ...; }` shortcut: uploads are
-        # user content, and content-api's UploadServeAction is what stamps the
-        # anti-XSS response headers (X-Content-Type-Options: nosniff, a sandbox
-        # CSP, and Content-Disposition: attachment for image/svg+xml). Serving the
-        # files statically would drop all of that and re-expose stored XSS via a
-        # crafted SVG. proxy_pass forwards the upstream headers as-is — keep it.
-        proxy_pass http://127.0.0.1:8001/;
-    }
-
     location /customer/ {
         proxy_pass http://127.0.0.1:8004/;
     }
 
-    # contact-api's route is literally /contact — forward without stripping.
-    location = /contact {
-        proxy_pass http://127.0.0.1:8002/contact;
+    # Catch-all: the composed frontend API (tds-core-frontend-api) owns the whole
+    # root namespace except /auth and /customer — its module routes (/tickets,
+    # /tools, /admin/settings, /me/…, /wiki.json, and any upload-serving routes)
+    # live at root. No trailing slash on proxy_pass → the path is forwarded
+    # unchanged. Upload-serving routes MUST stay on the PHP upstream so their
+    # anti-XSS response headers (nosniff, sandbox CSP, attachment disposition)
+    # are preserved — never shortcut them to a static alias.
+    location / {
+        proxy_pass http://127.0.0.1:8100;
     }
 
     location = /healthz {

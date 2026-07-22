@@ -2,9 +2,11 @@
 
 Diese Anleitung beschreibt das komplette Produktions-Release der TDS-Plattform auf
 einem Plesk-Host (Obsidian, mit Git-Extension, PHP 8.3 FPM, MariaDB, Let's Encrypt).
-Sie deckt **alle fünf Web-Properties** ab: vier statische Frontends und das
-API-Bundle, das Gateway + alle vier PHP-Services als **ein Plesk-Projekt**
-(eine Subdomain, ein Git-Checkout) deployt.
+Sie deckt die Web-Properties ab: die statischen Frontends und das API-Bundle, das
+Gateway + die drei PHP-Backends (`auth`, `customer`, `frontend`) als **ein
+Plesk-Projekt** (eine Subdomain, ein Git-Checkout) deployt. `frontend` ist
+`tds-core-frontend-api` — die komponierte Basis + Extensions, die die archivierten
+`content`/`contact`-Backends ersetzt hat, und die Default-Route des Gateways.
 
 Jedes Repo hat zwei Artefakt-Branches (der alte `build`-Branch existiert nicht
 mehr): **`dev`** (Developer-Version, CI baut sie automatisch nach jedem
@@ -17,9 +19,9 @@ einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 |---|---|---|---|
 | `tracht-digital.de` | `tds-landingpage-frontend` | `release` | statisch (HTML/CSS/JS) |
 | `blog.tracht-digital.de` | `tds-blog-frontend` | `release` | statisch |
-| `management.tracht-digital.de` | `tds-admin` | `release` | statisch |
-| `app.tracht-digital.de` | `tds-customer-legacy-frontend` | `release` | statisch |
-| `api.tracht-digital.de` | `tds-gateway-api` | `release` | PHP-Bundle: Gateway + `services/{auth,contact,content,customer}` |
+| `management.tracht-digital.de` | `tds-admin-frontend` | `release` | statisch |
+| `app.tracht-digital.de` | `tds-customer-frontend` | `release` | statisch |
+| `api.tracht-digital.de` | `tds-gateway-api` | `release` | PHP-Bundle: Gateway + `services/{auth,customer,frontend}` |
 
 ---
 
@@ -65,30 +67,30 @@ Für jede der vier Frontend-(Sub)Domains identisch:
 
 ## 4. `api.tracht-digital.de` — das API-Bundle als ein Projekt
 
-Gateway + alle vier Services laufen als **ein** Plesk-Projekt (eine Subdomain,
+Gateway + die drei Services laufen als **ein** Plesk-Projekt (eine Subdomain,
 ein Git-Checkout). Für die PHP-Abhängigkeiten gibt es zwei Wege — dieser
 Plesk-Host bringt einen **eingebauten PHP-Composer** mit
 (*Websites & Domains → PHP Composer*), du bist also nicht auf das vorgebaute
 Bundle angewiesen:
 
 - **A — `release`-Bundle (empfohlen, kein Composer-Schritt).** Der
-  `release`-Branch enthält Gateway + `services/{auth,contact,content,customer}`
-  inklusive aller `vendor/` (mit Phinx). Auschecken, fertig — Plesk muss nichts
-  installieren.
-- **B — `main` + Plesk-Composer.** Statt des Bundles den `main`-Branch
-  auschecken und in Plesk unter *PHP Composer* einmal `composer install
-  --no-dev` für das Gateway **und** für jeden `services/<name>/` ausführen.
-  Praktisch, wenn du ohne den Release-Knopf direkt vom Quellstand deployen
-  willst; sonst identisch zu Weg A.
+  `release`-Branch enthält Gateway + `services/{auth,customer,frontend}`
+  inklusive aller `vendor/` (mit Phinx; `frontend` inkl. seiner komponierten
+  Extensions). Auschecken, fertig — Plesk muss nichts installieren.
+- **B — `main` + Plesk-Composer.** Weg A ist für `frontend` klar empfohlen:
+  `tds-core-frontend-api` komponiert seine Extensions über Composer-`path`-Repos
+  auf Nachbar-Checkouts, die auf dem Host nicht liegen — ein reines `composer
+  install` aus `main` schlägt dort fehl. Gateway/auth/customer könnte man aus
+  `main` per *PHP Composer* (`composer install --no-dev`) bauen; für `frontend`
+  bleibt das assemblierte `release`-Bundle der Weg.
 
 Bundle-Layout (`release`-Branch):
 
 ```
 gateway/            ← Slim-Proxy (Docroot zeigt auf gateway/public)
-services/auth/      ← tds-auth-api      (Port 8003)
-services/contact/   ← tds-contact-api   (Port 8002)
-services/content/   ← tds-content-api   (Port 8001)
-services/customer/  ← tds-customer-api  (Port 8004)
+services/auth/      ← tds-auth-api          (Port 8003)
+services/customer/  ← tds-customer-api      (Port 8004)
+services/frontend/  ← tds-core-frontend-api (Port 8100, Default-Route)
 Procfile, services.json, BUILD_INFO.json
 ```
 
@@ -112,7 +114,7 @@ auf `:8000`) wird **nicht** benötigt.
 Im Standardmodus `GATEWAY_MODE=inprocess` lädt das Gateway die App jedes Service
 direkt aus `services/<name>/` (jeweils eigenes `vendor/`) und führt sie **im
 selben PHP-FPM-Request** aus. Es laufen **keine** `php -S`-Prozesse, kein
-Supervisor, kein Watchdog — PHP-FPM bedient alle vier APIs on demand. Genau das
+Supervisor, kein Watchdog — PHP-FPM bedient alle Backends on demand. Genau das
 macht „auf Plesk ohne SSH installieren und starten" möglich: Nach 4.1 (Docroot
 auf `gateway/public`) ist die Plattform startklar, sobald 4.3 (`.env` je Service)
 und die DBs (4.4, Schritt 1) stehen — **Migrationen laufen automatisch beim ersten
@@ -126,8 +128,8 @@ Abweichende Layouts über `GATEWAY_SERVICES_DIR` in der Gateway-`.env`.
 > Services lieber als eigene Loopback-Prozesse fährt, setzt `GATEWAY_MODE=proxy`
 > in der Gateway-`.env` und startet sie mit `deploy/supervisor.conf.example`
 > (mit Root) **oder** `gateway/bin/start-stack.sh` + *Geplante Aufgaben*
-> (`@reboot` + 5-Minuten-Watchdog). Ports: auth 8003, contact 8002,
-> content 8001, customer 8004. Auf Plesk im Normalfall **nicht** nötig.
+> (`@reboot` + 5-Minuten-Watchdog). Ports: auth 8003, customer 8004,
+> frontend 8100. Auf Plesk im Normalfall **nicht** nötig.
 
 ### 4.3 `.env` + Schlüssel je Service
 
@@ -147,40 +149,44 @@ zusätzlich in den Passwort-Manager.
 - **auth**: DB-Zugang, JWT-Konfiguration. Zusätzlich `keys/private.pem` aus dem
   Passwort-Manager nach `services/auth/keys/` kopieren (Dateirechte `600`).
   `keys/public.pem` liegt bereits im Bundle.
-- **contact**: DB-Zugang (Rate-Limit-DB), `AUTH_API_URL`, `SETTINGS_ENCRYPTION_KEY`.
-  Der Resend-API-Key wird **nicht mehr** hier gesetzt, sondern zur Laufzeit im
-  Admin-Frontend (Einrichtungsassistent / Einstellungen).
-- **content**: DB-Zugang, `ADMIN_TOKEN`, `SETTINGS_ENCRYPTION_KEY`. Der
-  GitHub-Blog-Rebuild-Token wird zur Laufzeit im Admin-Frontend gesetzt.
-- **customer**: DB-Zugang, `ADMIN_TOKEN`, JWKS-URL, `SETTINGS_ENCRYPTION_KEY`.
-  Stripe-Keys (und Ticket-Mail/Lexware) werden zur Laufzeit im Admin-Frontend gesetzt.
+- **customer**: DB-Zugang, `ADMIN_TOKEN`, JWKS-URL, `SETTINGS_ENCRYPTION_KEY`,
+  `DOCUMENT_SIGN_SECRET`. Stripe-Keys (und Ticket-Mail/Lexware) werden zur
+  Laufzeit im Admin-Frontend gesetzt.
+- **frontend** (`tds-core-frontend-api`): DB-Zugang (`tds_frontend` — alle
+  Extensions teilen sie), `AUTH_API_URL`, `SETTINGS_ENCRYPTION_KEY`, optional
+  `MAIL_DSN`, `DOCUMENT_ROOT_DIR`/`DOCUMENT_SIGN_SECRET` (documents-Extension).
+  Drittanbieter-Keys (Stripe, DeepL, Lexware, GitHub-Rebuild) kommen zur Laufzeit
+  ins Admin-Frontend.
 
 Der `SETTINGS_ENCRYPTION_KEY` (vom Installer je Service erzeugt) verschlüsselt die
 im Admin-Frontend gesetzten Dienst-Secrets in der `app_setting`-Tabelle. Ohne ihn
 werden Secrets im Klartext gespeichert (nur für Dev).
-- **gateway**: braucht standardmäßig **keine** `.env` — `GATEWAY_MODE=inprocess`
-  ist der Default und findet die Services unter `services/<name>`. Nur für das
-  interne `/wiki` zusätzlich `ADMIN_TOKEN` setzen (gleicher Admin-Token; ohne ihn
-  ist `/wiki` 404). (`/install.php` schreibt diese Gateway-`.env` mit.)
+- **gateway**: braucht standardmäßig **keine** `.env` und **keine** Secrets —
+  `GATEWAY_MODE=inprocess` ist der Default und findet die Services unter
+  `services/<name>`; `frontend` ist die Default-Route (`GATEWAY_DEFAULT_SERVICE`).
+  (`/install.php` schreibt eine minimale Gateway-`.env` mit.)
 
-Details je Service: das `INSTALL.md` im jeweiligen API-Repo.
+Details je Service: das `INSTALL.md`/`README.md` im jeweiligen Repo.
 
 ### 4.4 Datenbanken + Migrationen
 
 1. In Plesk je Service eine MariaDB-Datenbank + eigenen DB-User anlegen
-   (`tds_auth`, `tds_contact_ratelimit`, `tds_content`, `tds_customer` — Namen
-   frei, müssen nur zur jeweiligen `.env` passen).
+   (`tds_auth`, `tds_customer`, `tds_frontend` — Namen frei, müssen nur zur
+   jeweiligen `.env` passen; `tds_frontend` hält die Tabellen **aller**
+   Extensions).
 2. **Migrationen laufen automatisch.** Beim ersten Request nach einem Deploy
-   bringt das Gateway das Schema jedes Service selbst auf Stand — **in-process
-   über Phinx' `Manager`-API, ohne `proc_open` und ohne CLI-`php`**. Das ist
-   bewusst so gebaut: viele Plesk-Hosts deaktivieren `proc_open`, weshalb der
-   frühere Shell-Aufruf von Phinx (auch im Installer) still gar nichts anwendete
-   und die Prod-DB leer ließ. Sobald die DBs (Schritt 1) und die
-   `services/<name>/.env` (4.3) stehen, ist **kein manueller Migrationsschritt
-   nötig** — der erste Aufruf von z. B. `/content/blog` migriert und antwortet
-   dann normal. Idempotent und pro Migrations-Satz genau einmal (Marker unter
-   `gateway/var/`); mit `GATEWAY_AUTO_MIGRATE=0` in der Gateway-`.env`
-   abschaltbar.
+   bringt das Gateway `auth` + `customer` selbst auf Stand — **in-process über
+   Phinx' `Manager`-API, ohne `proc_open` und ohne CLI-`php`**. `frontend`
+   migriert seine komponierten Extensions über seinen **eigenen** In-Process-
+   Migrator (ein gemeinsames `phinxlog`), wenn seine App zum ersten Mal gebaut
+   wird. Das ist bewusst so gebaut: viele Plesk-Hosts deaktivieren `proc_open`,
+   weshalb der frühere Shell-Aufruf von Phinx still gar nichts anwendete und die
+   Prod-DB leer ließ. Sobald die DBs (Schritt 1) und die `services/<name>/.env`
+   (4.3) stehen, ist **kein manueller Migrationsschritt nötig** — der erste
+   Aufruf von z. B. `/tools/catalog` migriert und antwortet dann normal.
+   Idempotent und pro Migrations-Satz genau einmal (Marker unter `*/var/`); mit
+   `GATEWAY_AUTO_MIGRATE=0` in der Gateway-`.env` (auth/customer) bzw.
+   `AUTO_MIGRATE=0` in `services/frontend/.env` abschaltbar.
 
    > **Kontrolle:** `curl https://api.tracht-digital.de/healthz`. Ein Service mit
    > `"db":"no-schema"` (Aggregat dann `503`) = DB erreichbar, aber noch nicht
@@ -188,18 +194,21 @@ Details je Service: das `INSTALL.md` im jeweiligen API-Repo.
 
 3. **Fallback (nur falls die Auto-Migration scheitert)** — z. B. wenn in den
    Gateway-Logs (`gateway/logs/gateway.log`) `auto-migrate … failed` steht.
-   Migrationen laufen **aus dem Bundle** (Phinx liegt im `vendor/` jedes Service;
+   auth + customer migrieren **aus dem Bundle** (Phinx liegt im `vendor/`;
    `production` ist das Default-Environment der `phinx.php`):
 
 ```sh
 cd <zielpfad>
-for name in auth contact content customer; do
+for name in auth customer; do
   (cd "services/$name" && /opt/plesk/php/8.3/bin/php vendor/bin/phinx migrate -e production)
 done
 ```
 
    Bequemer: das mitgelieferte `gateway/bin/migrate-stack.sh` macht genau diese
    Schleife — `PHP_BIN=/opt/plesk/php/8.3/bin/php gateway/bin/migrate-stack.sh`.
+   `frontend` hat keine einzelne `phinx.php`; es migriert ausschließlich über
+   seinen eigenen Runner (erster Request; der Web-Installer stößt ihn zusätzlich
+   einmal an).
 
 ### 4.4a Setup-Admin (erster Login)
 
@@ -230,7 +239,7 @@ und man das Schema schon vor dem ersten echten Request setzen will:
 
 ```sh
 # optional — die Auto-Migration erledigt das sonst beim ersten Request
-for name in auth contact content customer; do
+for name in auth customer; do
   (cd "services/$name" && /opt/plesk/php/8.3/bin/php vendor/bin/phinx migrate -e production)
 done
 ```
@@ -239,18 +248,18 @@ Hält OPcache nach einem Pull alte Dateien, in Plesk einmal *PHP-FPM neu laden*
 (oder `opcache.validate_timestamps` an lassen).
 
 Die *Webhook-URL* dieser Git-Instanz als Secret `DEPLOY_WEBHOOK_URL` im
-**tds-api-gateway-Repo** hinterlegen — und **nur dort**. Die vier API-Repos
-brauchen das Secret nicht: ein Push in ein API-Repo feuert per
+**tds-api-gateway-Repo** hinterlegen — und **nur dort**. Die Backend-Repos
+brauchen das Secret nicht: ein Push in ein Backend-Repo feuert per
 `repository_dispatch` den Assemble-Workflow des Gateways, der das Bundle neu
 baut und selbst den Webhook pingt. (Die `DEPLOY_WEBHOOK_URL`-Steps in den
-API-CIs überspringen sich bei unbesetztem Secret lautlos.)
+Backend-CIs überspringen sich bei unbesetztem Secret lautlos.)
 
 ### 4.6 Verifikation
 
 ```sh
 curl https://api.tracht-digital.de/                 # Prefix-Navigation (Gateway lebt)
 curl https://api.tracht-digital.de/healthz          # aggregierte Service-Health (200 = alle grün)
-curl https://api.tracht-digital.de/content/blog     # → content-api
+curl https://api.tracht-digital.de/tools/catalog    # → frontend (Default-Route)
 ```
 
 `/healthz` liefert pro Service ein `db`-Feld: `ok` = migriert und bereit,

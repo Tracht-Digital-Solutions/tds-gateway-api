@@ -3,16 +3,16 @@
 #   docker compose up --build
 #
 # That starts MariaDB and the all-in-one API container (gateway :8000 + the
-# four micro-backends on the loopback). The gateway is published on
-# http://localhost:8080 by default.
+# backends on the loopback: auth, customer, and the composed frontend API). The
+# gateway is published on http://localhost:8080 by default.
 #
 #   curl http://localhost:8080/healthz          # aggregated service health
-#   curl http://localhost:8080/content/blog     # → content-api
+#   curl http://localhost:8080/tools/catalog    # → frontend (default route)
 #
-# Requires the four API repos checked out next to this one (../tds-*-api) —
-# they are wired in as named build contexts. Secrets are read from an optional
-# ./.env.docker (copy .env.docker.example); without it the stack still boots
-# on dev-safe placeholders.
+# Requires the backend repos AND the frontend's extension packages checked out
+# next to this one — they are wired in as named build contexts below. Secrets
+# are read from an optional ./.env.docker (copy .env.docker.example); without it
+# the stack still boots on dev-safe placeholders.
 #
 # The static frontends are optional and off by default (they are normally
 # deployed standalone). Build each one's dist/ first, then:
@@ -44,9 +44,17 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         auth: ../tds-auth-api
-        contact: ../tds-contact-api
-        content: ../tds-content-api
         customer: ../tds-customer-api
+        frontend: ../tds-core-frontend-api
+        contract: ../tds-frontend-contract-pkg
+        ext_time_tracker: ../tds-ext-time-tracker-pkg
+        ext_customers: ../tds-ext-customers-pkg
+        ext_billing: ../tds-ext-billing-pkg
+        ext_lexware: ../tds-ext-lexware-pkg
+        ext_tools: ../tds-ext-tools-pkg
+        ext_messages: ../tds-ext-messages-pkg
+        ext_projects: ../tds-ext-projects-pkg
+        ext_documents: ../tds-ext-documents-pkg
     restart: unless-stopped
     depends_on:
       db:
@@ -62,9 +70,9 @@ services:
     ports:
       - "${API_PORT:-8080}:8000"
 
-  # Optional: serve the four static frontends from their built dist/ folders.
+  # Optional: serve the static frontends from their built dist/ folders.
   # `docker compose --profile frontends up`. Build each dist/ first
-  # (cd ../tds-landingpage && npm run build, …).
+  # (cd ../tds-landingpage-frontend && npm run build, …).
   web:
     image: nginx:1.27-alpine
     profiles: ["frontends"]
@@ -73,10 +81,10 @@ services:
       - api
     volumes:
       - ./deploy/nginx.frontends.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../tds-landingpage/dist:/srv/landingpage:ro
-      - ../tds-blog/dist:/srv/blog:ro
-      - ../tds-admin/dist:/srv/admin:ro
-      - ../tds-customer/dist:/srv/customer:ro
+      - ../tds-landingpage-frontend/dist:/srv/landingpage:ro
+      - ../tds-blog-frontend/dist:/srv/blog:ro
+      - ../tds-admin-frontend/dist:/srv/admin:ro
+      - ../tds-customer-frontend/dist:/srv/customer:ro
     ports:
       - "${LANDING_PORT:-4321}:8081" # landingpage
       - "${BLOG_PORT:-4322}:8082"    # blog

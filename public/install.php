@@ -13,22 +13,29 @@ declare(strict_types=1);
  *   2. Database — host/port/user/pass + one db name per service; tests the
  *      connection and can create the databases if they don't exist yet.
  *   3. Secrets — shared admin token, document-sign secret, the settings-
- *      encryption key, CORS. Third-party service keys (Stripe, Resend email,
- *      GitHub blog-rebuild) are NOT set here anymore — they're configured at
- *      runtime in the admin panel (Einrichtungsassistent / Einstellungen),
- *      stored encrypted in each service's app_setting table.
+ *      encryption key, CORS. Third-party service keys (Stripe, DeepL, Lexware,
+ *      GitHub blog-rebuild) are NOT set here — they're configured at runtime in
+ *      the admin frontend („Einstellungen“), stored encrypted per service in the
+ *      app_setting table under the settings-encryption key.
  *   4. Install — writes each services/<name>/.env (+ the gateway .env),
- *      generates the auth RS256 keypair, creates the storage dirs, runs every
- *      service's phinx migrations, and creates the first admin login (shown on
- *      the final screen so you can sign in at management.tracht-digital.de).
+ *      generates the auth RS256 keypair, creates the storage dirs, runs the
+ *      migrations (auth + customer via their bundled phinx; frontend via
+ *      tds-core-frontend-api's own in-process migrator over its composed
+ *      extensions), and creates the first admin login (shown on the final screen
+ *      so you can sign in at management.tracht-digital.de).
+ *
+ * Services bundled: auth (tds-auth-api), customer (tds-customer-api), and
+ * frontend (tds-core-frontend-api — the composed base + extensions that replaced
+ * the archived content/contact backends; the gateway's default catch-all route).
  *
  * SECURITY: this script writes config + connects to your database. It
  * refuses to run once the stack is configured (a .tds-installed lock or an
  * existing services/auth/.env), and the final screen tells you to delete it.
  * Delete gateway/public/install.php once you're live.
  *
- * No framework, no autoloader of its own — it shells out to each service's
- * bundled phinx for migrations and uses ext-openssl directly for the keypair.
+ * No framework, no autoloader of its own — it drives the in-process Phinx
+ * migrator from each service's bundled vendor/ and uses ext-openssl directly
+ * for the keypair.
  */
 
 session_start();
@@ -38,12 +45,11 @@ $BUNDLE_DIR  = dirname($GATEWAY_DIR);            // <bundle>
 $SERVICES_DIR = $BUNDLE_DIR . '/services';
 $LOCK_FILE = $BUNDLE_DIR . '/.tds-installed';
 
-/** name => [label, default db name, .env builder key]. */
+/** name => [label, default db name]. */
 $SERVICES = [
     'auth'     => ['Auth-API', 'tds_auth'],
-    'contact'  => ['Contact-API', 'tds_contact_ratelimit'],
-    'content'  => ['Content-API', 'tds_content'],
     'customer' => ['Customer-API', 'tds_customer'],
+    'frontend' => ['Core-Frontend-API', 'tds_frontend'],
 ];
 
 // --- small helpers ----------------------------------------------------------
@@ -134,25 +140,24 @@ function env_for(string $name, array $c): string
                 // das Passwort steht bewusst NICHT im Klartext in der .env.
                 . "ADMIN_BOOTSTRAP_EMAIL={$c['admin_email']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
-        case 'contact':
-            // Resend keys (RESEND_API_KEY/RESEND_FROM/CONTACT_EMAIL) are set at
-            // runtime in the admin panel, encrypted under SETTINGS_ENCRYPTION_KEY.
+        case 'frontend':
+            // tds-core-frontend-api — the composed base + extensions that
+            // replaced the archived content/contact backends. It is the default
+            // (catch-all) upstream. Third-party keys (Stripe, DeepL, Lexware,
+            // GitHub rebuild) are set at runtime in the admin frontend under
+            // „Einstellungen“, encrypted under SETTINGS_ENCRYPTION_KEY. It
+            // auto-migrates its extensions' schema in-process on the first
+            // request (AUTO_MIGRATE defaults to 1).
             return $base
-                . "DB_NAME={$c['db_contact']}\n"
+                . "DB_NAME={$c['db_frontend']}\n"
                 . "AUTH_API_URL={$c['auth_api_url']}\n"
                 . "JWKS_CACHE_TTL=600\n"
                 . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
-                . "RATE_LIMIT_PER_HOUR=3\n"
-                . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
-        case 'content':
-            // The GitHub blog-rebuild token + BLOG_REBUILD_* are set at runtime
-            // in the admin panel, encrypted under SETTINGS_ENCRYPTION_KEY.
-            return $base
-                . "DB_NAME={$c['db_content']}\n"
-                . "ADMIN_TOKEN={$c['admin_token']}\n"
-                . "AUTH_API_URL={$c['auth_api_url']}\n"
-                . "BLOG_UPLOAD_DIR={$c['blog_upload_dir']}\n"
-                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
+                . "MAIL_DSN=\n"
+                . "MAIL_FROM=no-reply@tracht-digital.de\n"
+                . "MAIL_FROM_NAME=Tracht Digital Solutions\n"
+                . "DOCUMENT_ROOT_DIR={$c['document_root_dir']}\n"
+                . "DOCUMENT_SIGN_SECRET={$c['document_sign_secret']}\n"
                 . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
         case 'customer':
             // Stripe keys are set at runtime in the admin panel, encrypted under
@@ -320,22 +325,109 @@ function run_migration(string $serviceDir, int $timeout = 120): array
     return [$code === 0, trim($out)];
 }
 
+/** Minimal `.env` reader — KEY=VALUE, ignores comments/quotes. */
+function read_env_kv(string $file): array
+{
+    if (!is_file($file)) {
+        return [];
+    }
+    $out = [];
+    foreach ((array) file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $line = trim((string) $line);
+        if ($line === '' || $line[0] === '#') {
+            continue;
+        }
+        $eq = strpos($line, '=');
+        if ($eq === false) {
+            continue;
+        }
+        $key = trim(substr($line, 0, $eq));
+        $val = trim(substr($line, $eq + 1));
+        $len = strlen($val);
+        if ($len >= 2 && ($val[0] === '"' || $val[0] === "'") && $val[$len - 1] === $val[0]) {
+            $val = substr($val, 1, -1);
+        }
+        $out[$key] = $val;
+    }
+    return $out;
+}
+
+/**
+ * Migrate the composed frontend API (tds-core-frontend-api) in-process.
+ *
+ * Unlike auth/customer, the frontend has no single db/migrations + phinx.php —
+ * it composes every enabled extension's migration paths and applies them
+ * through its OWN in-process migrator into one shared `phinxlog`. We drive that
+ * runner directly (needs the frontend's bundled vendor/). It also auto-migrates
+ * on the first request (AUTO_MIGRATE=1), so this step is a head start, not the
+ * only path.
+ */
+function migrate_frontend(string $frontendDir): array
+{
+    $autoload = $frontendDir . '/vendor/autoload.php';
+    if (!is_file($autoload)) {
+        return [false, 'services/frontend/vendor/ fehlt — Bundle nicht assembliert.'];
+    }
+    require_once $autoload;
+    if (!class_exists(\Tds\CoreFrontendApi\Modules::class)
+        || !class_exists(\Tds\CoreFrontendApi\Support\MigrationRunner::class)) {
+        return [false, 'tds-core-frontend-api-Klassen nicht gefunden (Autoload).'];
+    }
+
+    $env = read_env_kv($frontendDir . '/.env');
+    if (($env['DB_NAME'] ?? '') === '') {
+        return [false, 'DB_NAME fehlt in services/frontend/.env.'];
+    }
+
+    $host = $env['DB_HOST'] ?? '127.0.0.1';
+    $port = $env['DB_PORT'] ?? '3306';
+    $name = $env['DB_NAME'];
+    $user = $env['DB_USER'] ?? 'root';
+    $pass = $env['DB_PASS'] ?? '';
+
+    try {
+        $runner = new \Tds\CoreFrontendApi\Support\MigrationRunner(
+            \Tds\CoreFrontendApi\Modules::migrationPaths(),
+            ['host' => $host, 'port' => $port, 'name' => $name, 'user' => $user, 'pass' => $pass],
+            $frontendDir . '/var/migrate',
+        );
+        $runner->ensureMigrated();
+    } catch (\Throwable $e) {
+        return [false, 'Frontend-Migration fehlgeschlagen: ' . $e->getMessage()
+            . ' — läuft ansonsten automatisch beim ersten Request.'];
+    }
+
+    // Verify by counting applied migrations in the shared phinxlog. A zero here
+    // isn't fatal (the auto-migrator retries on the first request), but a
+    // populated log confirms the in-process run reached the database.
+    try {
+        $pdo = new PDO(
+            dsn_db($host, $port, $name),
+            $user,
+            $pass,
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5]
+        );
+        $count = (int) $pdo->query('SELECT COUNT(*) FROM phinxlog')->fetchColumn();
+        return [true, "Extensions migriert (in-process) — {$count} Migration(en) im phinxlog."];
+    } catch (\Throwable $e) {
+        return [true, 'Frontend-Migrator ausgeführt; Verifikation übersprungen ('
+            . $e->getMessage() . '). Läuft zusätzlich beim ersten Request.'];
+    }
+}
+
 /** Ordered list of install steps the apply phase runs, as [id, label] pairs. */
 function install_tasks(): array
 {
     return [
         ['env_gateway',  'gateway/.env'],
         ['env_auth',     'services/auth/.env'],
-        ['env_contact',  'services/contact/.env'],
-        ['env_content',  'services/content/.env'],
         ['env_customer', 'services/customer/.env'],
+        ['env_frontend', 'services/frontend/.env'],
         ['keys',         'Auth RS256-Schlüsselpaar'],
         ['dir_documents','Dokument-Verzeichnis'],
-        ['dir_blog',     'Blog-Upload-Verzeichnis'],
         ['migrate_auth',    'Migration: auth'],
-        ['migrate_contact', 'Migration: contact'],
-        ['migrate_content', 'Migration: content'],
         ['migrate_customer','Migration: customer'],
+        ['migrate_frontend','Migration: frontend (Extensions)'],
         ['create_admin', 'Admin-Konto'],
         ['finalize',     'Abschluss'],
     ];
@@ -350,14 +442,16 @@ function run_task(string $id, array $c, string $gatewayDir, string $servicesDir,
 {
     switch ($id) {
         case 'env_gateway':
+            // The gateway is a pure router — no secrets. GATEWAY_SERVICES +
+            // GATEWAY_DEFAULT_SERVICE have baked defaults (auth,customer,frontend
+            // / frontend), so a minimal .env is enough.
             $ok = @file_put_contents($gatewayDir . '/.env',
-                "APP_ENV=production\nADMIN_TOKEN={$c['admin_token']}\n") !== false;
+                "APP_ENV=production\n") !== false;
             return [$ok, $ok ? 'gateway/.env geschrieben.' : 'Konnte gateway/.env nicht schreiben.'];
 
         case 'env_auth':
-        case 'env_contact':
-        case 'env_content':
         case 'env_customer':
+        case 'env_frontend':
             $name = substr($id, 4); // strip "env_"
             $ok = @file_put_contents($servicesDir . '/' . $name . '/.env', env_for($name, $c)) !== false;
             return [$ok, $ok ? "services/{$name}/.env geschrieben." : "Konnte services/{$name}/.env nicht schreiben."];
@@ -370,17 +464,18 @@ function run_task(string $id, array $c, string $gatewayDir, string $servicesDir,
             $ok = is_dir($dir) || @mkdir($dir, 0700, true);
             return [$ok, $ok ? $dir : "Konnte {$dir} nicht anlegen."];
 
-        case 'dir_blog':
-            $dir = $c['blog_upload_dir'];
-            $ok = is_dir($dir) || @mkdir($dir, 0775, true);
-            return [$ok, $ok ? $dir : "Konnte {$dir} nicht anlegen."];
-
         case 'migrate_auth':
-        case 'migrate_contact':
-        case 'migrate_content':
         case 'migrate_customer':
             $name = substr($id, 8); // strip "migrate_"
             return run_migration($servicesDir . '/' . $name);
+
+        case 'migrate_frontend':
+            // tds-core-frontend-api composes its extensions' migrations and runs
+            // them through its OWN in-process migrator (there is no single
+            // db/migrations + phinx.php to point Phinx at). It auto-migrates on
+            // the first request after install (AUTO_MIGRATE=1); we trigger it now
+            // so the schema is ready before the first visitor.
+            return migrate_frontend($servicesDir . '/frontend');
 
         case 'create_admin':
             return create_admin_account($c);
@@ -467,9 +562,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
             'db_user' => post('db_user'),
             'db_pass' => post('db_pass'),
             'db_auth' => post('db_auth', 'tds_auth'),
-            'db_contact' => post('db_contact', 'tds_contact_ratelimit'),
-            'db_content' => post('db_content', 'tds_content'),
             'db_customer' => post('db_customer', 'tds_customer'),
+            'db_frontend' => post('db_frontend', 'tds_frontend'),
         ]);
         $c = $_SESSION['tds_install'];
         try {
@@ -477,7 +571,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_TIMEOUT => 5,
             ]);
-            $dbs = [$c['db_auth'], $c['db_contact'], $c['db_content'], $c['db_customer']];
+            $dbs = [$c['db_auth'], $c['db_customer'], $c['db_frontend']];
             if (post('create_dbs') === '1') {
                 foreach ($dbs as $db) {
                     $pdo->exec("CREATE DATABASE IF NOT EXISTS `" . str_replace('`', '', $db)
@@ -520,7 +614,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
             'settings_encryption_key' => post('settings_encryption_key') ?: token(32),
             'document_sign_secret' => post('document_sign_secret') ?: token(32),
             'document_root_dir' => post('document_root_dir', $BUNDLE_DIR . '/var/customer-files'),
-            'blog_upload_dir' => post('blog_upload_dir', $BUNDLE_DIR . '/var/blog-uploads'),
         ]);
         $step = 4; // → review/apply
     } elseif ($step === 4) {
@@ -532,7 +625,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
         $c = $_SESSION['tds_install'];
         $applyResults = ['env' => [], 'keys' => null, 'dirs' => [], 'migrations' => []];
 
-        foreach (['gateway', 'auth', 'contact', 'content', 'customer'] as $name) {
+        foreach (['gateway', 'auth', 'customer', 'frontend'] as $name) {
             $id = $name === 'gateway' ? 'env_gateway' : 'env_' . $name;
             [$ok] = run_task($id, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
             $applyResults['env'][$name] = $ok;
@@ -540,12 +633,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$alreadyInstalled && $bundleOk) {
 
         $applyResults['keys'] = run_task('keys', $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
 
-        foreach (['dir_documents' => 'document_root_dir', 'dir_blog' => 'blog_upload_dir'] as $id => $key) {
+        foreach (['dir_documents' => 'document_root_dir'] as $id => $key) {
             [$ok, $detail] = run_task($id, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
             $applyResults['dirs'][$c[$key]] = $ok;
         }
 
-        foreach (['auth', 'contact', 'content', 'customer'] as $name) {
+        foreach (['auth', 'customer', 'frontend'] as $name) {
             $applyResults['migrations'][$name] = run_task('migrate_' . $name, $c, $GATEWAY_DIR, $SERVICES_DIR, $LOCK_FILE);
         }
 
@@ -729,12 +822,11 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
         <legend>Datenbanknamen</legend>
         <div class="grid4">
           <div><label>Auth</label><input type="text" name="db_auth" value="<?= h(cfg('db_auth', 'tds_auth')) ?>" /></div>
-          <div><label>Contact</label><input type="text" name="db_contact" value="<?= h(cfg('db_contact', 'tds_contact_ratelimit')) ?>" /></div>
-          <div><label>Content</label><input type="text" name="db_content" value="<?= h(cfg('db_content', 'tds_content')) ?>" /></div>
           <div><label>Customer</label><input type="text" name="db_customer" value="<?= h(cfg('db_customer', 'tds_customer')) ?>" /></div>
+          <div><label>Frontend <span class="opt">(alle Extensions)</span></label><input type="text" name="db_frontend" value="<?= h(cfg('db_frontend', 'tds_frontend')) ?>" /></div>
         </div>
         <label class="cb"><input type="checkbox" name="create_dbs" value="1" checked /> Fehlende Datenbanken anlegen (Benutzer braucht das <code>CREATE</code>-Recht)</label>
-        <label class="cb"><input type="checkbox" name="reset_dbs" value="1" /> <strong>Vorhandene Tabellen zuerst löschen</strong> (Neuinstallation / Reparatur eines abgebrochenen Migrationslaufs) — <span style="color:var(--err)">löscht alle Tabellen in den vier Datenbanken</span></label>
+        <label class="cb"><input type="checkbox" name="reset_dbs" value="1" /> <strong>Vorhandene Tabellen zuerst löschen</strong> (Neuinstallation / Reparatur eines abgebrochenen Migrationslaufs) — <span style="color:var(--err)">löscht alle Tabellen in den drei Datenbanken</span></label>
       </fieldset>
       <button class="btn" type="submit">Verbindung testen &amp; weiter →</button>
     </form>
@@ -746,7 +838,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       <input type="hidden" name="__step" value="3" />
       <fieldset>
         <legend>Kern</legend>
-        <label>Admin-Token <span class="opt">(geteilt von auth/content/customer + /wiki)</span></label>
+        <label>Admin-Token <span class="opt">(geteilt von auth/customer)</span></label>
         <input type="text" name="admin_token" value="<?= h(cfg('admin_token', token())) ?>" />
         <div class="row">
           <div>
@@ -771,10 +863,8 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       </fieldset>
       <fieldset>
         <legend>Speicherpfade</legend>
-        <label>Dokument-Verzeichnis <span class="opt">(außerhalb des Webroots, 700)</span></label>
+        <label>Dokument-Verzeichnis <span class="opt">(außerhalb des Webroots, 700 — customer-api + documents-Extension)</span></label>
         <input type="text" name="document_root_dir" value="<?= h(cfg('document_root_dir', $BUNDLE_DIR . '/var/customer-files')) ?>" />
-        <label>Blog-Upload-Verzeichnis</label>
-        <input type="text" name="blog_upload_dir" value="<?= h(cfg('blog_upload_dir', $BUNDLE_DIR . '/var/blog-uploads')) ?>" />
       </fieldset>
       <button class="btn" type="submit">Weiter zur Übersicht →</button>
     </form>
@@ -786,7 +876,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 
     <div id="review">
       <div class="check"><span class="badge b-ok">DB</span><span><?= h(cfg('db_user')) ?>@<?= h(cfg('db_host')) ?>:<?= h(cfg('db_port')) ?></span></div>
-      <div class="check"><span class="badge b-ok">.env</span><span>auth, contact, content, customer + gateway</span></div>
+      <div class="check"><span class="badge b-ok">.env</span><span>auth, customer, frontend + gateway</span></div>
       <div class="check"><span class="badge b-ok">Keys</span><span>Auth RS256-Schlüsselpaar</span></div>
       <div class="check"><span class="badge <?= migrations_available() ? 'b-ok' : 'b-warn' ?>">Migrationen</span><span><?= migrations_available() ? 'phinx je Service' : 'proc_open deaktiviert — manuell nötig' ?></span></div>
       <div class="check"><span class="badge b-ok">Admin</span><span><?= h(cfg('admin_email', 'admin@tracht-digital.de')) ?> (Login für management.tracht-digital.de)</span></div>
@@ -815,8 +905,8 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       </div>
       <div class="note ok">
         Fertig — es müssen <strong>keine Dienst-Prozesse gestartet</strong> werden: Das Gateway bedient die
-        vier APIs im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die Plattform
-        direkt über <code>/healthz</code> und das interne Wiki unter <code>/wiki</code>.
+        Services (auth, customer, frontend) im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die
+        Plattform über <code>/healthz</code>; das interne API-Wiki liefert die Frontend-API unter <code>/wiki.json</code>.
       </div>
       <div class="note err">
         <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.
@@ -967,8 +1057,8 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 
     <div class="note ok">
       Fertig — es müssen <strong>keine Dienst-Prozesse gestartet</strong> werden: Das Gateway bedient die
-      vier APIs im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die Plattform
-      direkt über <code>/healthz</code> und das interne Wiki unter <code>/wiki</code>.
+      Services (auth, customer, frontend) im selben PHP-FPM-Prozess (<code>GATEWAY_MODE=inprocess</code>). Prüfen Sie die
+        Plattform über <code>/healthz</code>; das interne API-Wiki liefert die Frontend-API unter <code>/wiki.json</code>.
     </div>
     <div class="note err">
       <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.

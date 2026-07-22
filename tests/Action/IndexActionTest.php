@@ -26,7 +26,7 @@ final class IndexActionTest extends TestCase
         $body = json_decode((string) $response->getBody(), true);
         self::assertSame('tds-api-gateway', $body['name']);
         $prefixes = array_column($body['services'], 'prefix');
-        self::assertSame(['/auth', '/contact', '/content', '/customer'], $prefixes);
+        self::assertSame(['/auth', '/customer', '/frontend'], $prefixes);
         // No internal host:port leaked.
         self::assertStringNotContainsString('127.0.0.1', (string) $response->getBody());
     }

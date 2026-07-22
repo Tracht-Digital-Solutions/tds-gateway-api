@@ -60,45 +60,6 @@ if [ -n "${JWT_PRIVATE_KEY:-}" ] && ! grep -q '^JWT_PRIVATE_KEY=' "$SERVICES_DIR
   printf 'JWT_PRIVATE_KEY=%s\n' "$JWT_PRIVATE_KEY" >> "$SERVICES_DIR/auth/.env"
 fi
 
-write_env_if_absent contact <<EOF
-APP_ENV=production
-DB_HOST=$DB_HOST
-DB_PORT=$DB_PORT
-DB_NAME=${CONTACT_DB_NAME:-tds_contact_ratelimit}
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-AUTH_API_URL=$AUTH_API_URL
-JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
-SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
-# Resend keys are optional env fallbacks — normally set at runtime in the admin
-# panel (Einrichtungsassistent / Einstellungen), stored encrypted in app_setting.
-RESEND_API_KEY=${RESEND_API_KEY:-}
-RESEND_FROM=${RESEND_FROM:-noreply@tracht-digital.de}
-CONTACT_EMAIL=${CONTACT_EMAIL:-hallo@tracht-digital.de}
-RATE_LIMIT_PER_HOUR=${RATE_LIMIT_PER_HOUR:-3}
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
-EOF
-
-write_env_if_absent content <<EOF
-APP_ENV=production
-DB_HOST=$DB_HOST
-DB_PORT=$DB_PORT
-DB_NAME=${CONTENT_DB_NAME:-tds_content}
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-ADMIN_TOKEN=$ADMIN_TOKEN
-AUTH_API_URL=$AUTH_API_URL
-BLOG_UPLOAD_DIR=${BLOG_UPLOAD_DIR:-/srv/tds/var/blog-uploads}
-SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
-# GitHub blog-rebuild config is optional env fallback — normally set at runtime
-# in the admin panel, stored encrypted in app_setting.
-GITHUB_DISPATCH_TOKEN=${GITHUB_DISPATCH_TOKEN:-}
-BLOG_REBUILD_REPO=${BLOG_REBUILD_REPO:-Tracht-Digital-Solutions/tds-blog-frontend}
-BLOG_REBUILD_WORKFLOW=${BLOG_REBUILD_WORKFLOW:-build.yml}
-BLOG_REBUILD_REF=${BLOG_REBUILD_REF:-main}
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
-EOF
-
 write_env_if_absent customer <<EOF
 APP_ENV=production
 DB_HOST=$DB_HOST
@@ -121,8 +82,30 @@ DOCUMENT_SIGN_SECRET=${DOCUMENT_SIGN_SECRET:-dev-document-sign-secret-change-me}
 CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
 EOF
 
+# frontend = tds-core-frontend-api (composed base + extensions; the gateway's
+# default catch-all route). All extensions share one DB and auto-migrate
+# in-process on the first request (AUTO_MIGRATE=1). Third-party keys (Stripe,
+# DeepL, Lexware, GitHub rebuild) are set at runtime in the admin frontend.
+write_env_if_absent frontend <<EOF
+APP_ENV=production
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=${FRONTEND_DB_NAME:-tds_frontend}
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+AUTH_API_URL=$AUTH_API_URL
+JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
+SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+MAIL_DSN=${MAIL_DSN:-}
+MAIL_FROM=${MAIL_FROM:-no-reply@tracht-digital.de}
+MAIL_FROM_NAME=${MAIL_FROM_NAME:-Tracht Digital Solutions}
+DOCUMENT_ROOT_DIR=${DOCUMENT_ROOT_DIR:-/srv/tds/var/customer-files}
+DOCUMENT_SIGN_SECRET=${DOCUMENT_SIGN_SECRET:-dev-document-sign-secret-change-me}
+CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+EOF
+
 # Storage dirs the services expect to be writable.
-mkdir -p /srv/tds/var/blog-uploads /srv/tds/var/customer-files
+mkdir -p /srv/tds/var/customer-files
 
 # auth: ensure a signing keypair exists (keygen writes keys/{private,public}.pem).
 if [ -z "${JWT_PRIVATE_KEY:-}" ] && [ ! -f "$SERVICES_DIR/auth/keys/private.pem" ]; then

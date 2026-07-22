@@ -32,14 +32,14 @@ final class HealthActionTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertTrue($body['ok']);
-        self::assertCount(4, $body['services']);
+        self::assertCount(3, $body['services']);
     }
 
     public function testOneUnhealthyReturns503(): void
     {
         $client = new FakeProxyClient(new ProxyResponse(200, [], 'ok'));
-        // contact reports a 500 on its health check.
-        $client->whenUrlContains(':8002', new ProxyResponse(500, [], 'down'));
+        // frontend reports a 500 on its health check.
+        $client->whenUrlContains(':8100', new ProxyResponse(500, [], 'down'));
         $action = new HealthAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
@@ -49,16 +49,16 @@ final class HealthActionTest extends TestCase
         self::assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertFalse($body['ok']);
-        self::assertFalse($body['services']['/contact']['ok']);
+        self::assertFalse($body['services']['/frontend']['ok']);
         self::assertTrue($body['services']['/auth']['ok']);
     }
 
     public function testReachableButUnmigratedUpstreamCountsAsDown(): void
     {
-        // Every upstream answers 200 (never-5xx health contract), but content
+        // Every upstream answers 200 (never-5xx health contract), but frontend
         // reports its schema is missing. The aggregate must still go 503.
         $client = new FakeProxyClient(new ProxyResponse(200, [], '{"status":"ok","db":"ok"}'));
-        $client->whenUrlContains(':8001', new ProxyResponse(200, [], '{"status":"ok","db":"no-schema"}'));
+        $client->whenUrlContains(':8100', new ProxyResponse(200, [], '{"status":"ok","db":"no-schema"}'));
         $action = new HealthAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
@@ -68,8 +68,8 @@ final class HealthActionTest extends TestCase
         self::assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertFalse($body['ok']);
-        self::assertFalse($body['services']['/content']['ok']);
-        self::assertSame('no-schema', $body['services']['/content']['db']);
+        self::assertFalse($body['services']['/frontend']['ok']);
+        self::assertSame('no-schema', $body['services']['/frontend']['db']);
         // A 200 + db:ok upstream stays healthy.
         self::assertTrue($body['services']['/auth']['ok']);
         self::assertSame('ok', $body['services']['/auth']['db']);
@@ -78,8 +78,8 @@ final class HealthActionTest extends TestCase
     public function testTransportFailureCountsAsDownAndPingsEveryUpstream(): void
     {
         $client = new FakeProxyClient(new ProxyResponse(200, [], 'ok'));
-        // contact's health check fails at the transport layer (connect refused).
-        $client->throwWhenUrlContains(':8002');
+        // frontend's health check fails at the transport layer (connect refused).
+        $client->throwWhenUrlContains(':8100');
         $action = new HealthAction($this->registry(), $client);
 
         $request = (new ServerRequestFactory())
@@ -89,11 +89,11 @@ final class HealthActionTest extends TestCase
         self::assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getBody(), true);
         self::assertFalse($body['ok']);
-        self::assertFalse($body['services']['/contact']['ok']);
-        self::assertSame(0, $body['services']['/contact']['status']);
+        self::assertFalse($body['services']['/frontend']['ok']);
+        self::assertSame(0, $body['services']['/frontend']['status']);
         self::assertTrue($body['services']['/auth']['ok']);
-        self::assertCount(4, $body['services']);
+        self::assertCount(3, $body['services']);
         // Every upstream is still pinged even though one fails.
-        self::assertSame(4, $client->calls);
+        self::assertSame(3, $client->calls);
     }
 }
