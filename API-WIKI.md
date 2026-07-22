@@ -73,7 +73,7 @@ _Quelle: `../tds-contact-api/src/Bootstrap.php`_
 
 ## Content-API
 
-Blog posts + media; admin deployment/version panel.
+Blog posts + media; admin deployment/version frontend.
 
 _Quelle: `../tds-content-api/src/Bootstrap.php`_
 

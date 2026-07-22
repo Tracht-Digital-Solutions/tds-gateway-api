@@ -149,14 +149,14 @@ zusätzlich in den Passwort-Manager.
   `keys/public.pem` liegt bereits im Bundle.
 - **contact**: DB-Zugang (Rate-Limit-DB), `AUTH_API_URL`, `SETTINGS_ENCRYPTION_KEY`.
   Der Resend-API-Key wird **nicht mehr** hier gesetzt, sondern zur Laufzeit im
-  Admin-Panel (Einrichtungsassistent / Einstellungen).
+  Admin-Frontend (Einrichtungsassistent / Einstellungen).
 - **content**: DB-Zugang, `ADMIN_TOKEN`, `SETTINGS_ENCRYPTION_KEY`. Der
-  GitHub-Blog-Rebuild-Token wird zur Laufzeit im Admin-Panel gesetzt.
+  GitHub-Blog-Rebuild-Token wird zur Laufzeit im Admin-Frontend gesetzt.
 - **customer**: DB-Zugang, `ADMIN_TOKEN`, JWKS-URL, `SETTINGS_ENCRYPTION_KEY`.
-  Stripe-Keys (und Ticket-Mail/Lexware) werden zur Laufzeit im Admin-Panel gesetzt.
+  Stripe-Keys (und Ticket-Mail/Lexware) werden zur Laufzeit im Admin-Frontend gesetzt.
 
 Der `SETTINGS_ENCRYPTION_KEY` (vom Installer je Service erzeugt) verschlüsselt die
-im Admin-Panel gesetzten Dienst-Secrets in der `app_setting`-Tabelle. Ohne ihn
+im Admin-Frontend gesetzten Dienst-Secrets in der `app_setting`-Tabelle. Ohne ihn
 werden Secrets im Klartext gespeichert (nur für Dev).
 - **gateway**: braucht standardmäßig **keine** `.env` — `GATEWAY_MODE=inprocess`
   ist der Default und findet die Services unter `services/<name>`. Nur für das
@@ -211,7 +211,7 @@ benutzbar ist — und erzwingt sofort ein sicheres Passwort:
   wertlos. **Vor dem ersten Migrate** in `services/auth/.env`
   `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` setzen, damit der
   öffentliche Default gar nicht erst entsteht.
-- **Sichern:** im Admin-Panel als Setup-Admin einloggen und den erzwungenen
+- **Sichern:** im Admin-Frontend als Setup-Admin einloggen und den erzwungenen
   Passwortwechsel abschließen (bzw. `POST /auth/login` → `PUT /auth/password`
   `{old,new}`, neu ≥ 12 Zeichen). Danach **`gateway/public/install.php`
   löschen**.

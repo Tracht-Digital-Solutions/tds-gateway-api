@@ -102,7 +102,7 @@ Each service still needs its own `.env` on the host (DB creds, JWT keys, plus a
 `SETTINGS_ENCRYPTION_KEY` on content/contact/customer — see each service's
 INSTALL.md; the `/install.php` wizard writes them all). Third-party service
 secrets (Stripe, Resend email, the GitHub blog-rebuild token) are **not** in
-`.env` anymore — they're configured at runtime in the admin panel
+`.env` anymore — they're configured at runtime in the admin frontend
 (Einrichtungsassistent / Einstellungen) and stored encrypted in each service's
 `app_setting` table. The gateway itself needs only `ADMIN_TOKEN` if you want the
 internal `/wiki` (set it to the same shared admin token; unset leaves the wiki

@@ -11,11 +11,11 @@ env-helper / CI / deploy-webhook conventions as the backends — read the root
 
 > Status: **required by both architectures — not superseded.** Today it bundles the
 > four legacy services (`auth`, `customer`, and the archived `content`/`contact` code,
-> still deployed until cutover). After the panel-platform cutover it must still route
-> to `tds-core-panel-api` + `tds-auth-api`. See the root `MIGRATION-STATUS.md`.
+> still deployed until cutover). After the frontend-platform cutover it must still route
+> to `tds-core-frontend-api` + `tds-auth-api`. See the root `MIGRATION-STATUS.md`.
 >
 > Note: this repo also carries a `CLAUDE.md` — it is a **stale copy** of an older root
-> `CLAUDE.md` (pre-panel, mentions Resend/the ten repos). Trust the root
+> `CLAUDE.md` (pre-frontend, mentions Resend/the ten repos). Trust the root
 > `C:\Projects\TDS-LP\CLAUDE.md` + this `AGENTS.md`, not the in-repo copy.
 
 ## Mental model
@@ -262,7 +262,7 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   when a service gains an env var.
 - **Only installation-relevant secrets are set here.** Step 3 no longer collects
   third-party service keys (Stripe, Resend email, GitHub blog-rebuild) — those are
-  configured at runtime in the admin panel (Einrichtungsassistent / Einstellungen)
+  configured at runtime in the admin frontend (Einrichtungsassistent / Einstellungen)
   and stored encrypted in each service's `app_setting` table. The installer only
   provisions a per-service `SETTINGS_ENCRYPTION_KEY` (auto-generated, like
   `document_sign_secret`) that protects those runtime secrets — written into the
@@ -289,9 +289,9 @@ needed). That asymmetric failure is the tell for an unset/expired token.
   to the public default and the operator would never see working credentials. The
   chosen e-mail is still mirrored into auth's `.env` as `ADMIN_BOOTSTRAP_EMAIL`
   (identity only — the password is not persisted in plaintext). Both done screens
-  (JS `donePanel` + no-JS step 5) print the login and the admin-panel URL
+  (JS `donePanel` + no-JS step 5) print the login and the admin-frontend URL
   (`management.tracht-digital.de`).
-- **CORS default** lists `management.tracht-digital.de` (the admin panel's current
+- **CORS default** lists `management.tracht-digital.de` (the admin frontend's current
   address) alongside `admin.`/`app.`/blog/landing — keep it in sync with the four
   services' `.env.example` `CORS_ALLOWED_ORIGINS`.
 - **Security:** refuses to run once a `.tds-installed` lock (bundle root) or
