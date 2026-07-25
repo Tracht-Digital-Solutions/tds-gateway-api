@@ -288,7 +288,7 @@ That asymmetric failure is the tell for an unset/expired token.
   phinx (`run_migration`). `frontend` (`tds-core-frontend-api`) has no single
   `db/migrations` + `phinx.php` — it composes every enabled extension's migration
   paths and applies them through its OWN in-process migrator (`migrate_frontend()`
-  requires the frontend `vendor/`, builds `Modules::migrationPaths()` +
+  requires the frontend `vendor/`, builds `Bootstrap::migrationPaths()` +
   `Support\MigrationRunner`, and verifies via a `phinxlog` count). It also
   auto-migrates on the first request (`AUTO_MIGRATE=1`), so the installer step is
   a head start, not the only path. All frontend extensions share one DB

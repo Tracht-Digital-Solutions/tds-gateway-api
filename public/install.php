@@ -369,7 +369,7 @@ function migrate_frontend(string $frontendDir): array
         return [false, 'services/frontend/vendor/ fehlt — Bundle nicht assembliert.'];
     }
     require_once $autoload;
-    if (!class_exists(\Tds\CoreFrontendApi\Modules::class)
+    if (!class_exists(\Tds\CoreFrontendApi\Bootstrap::class)
         || !class_exists(\Tds\CoreFrontendApi\Support\MigrationRunner::class)) {
         return [false, 'tds-core-frontend-api-Klassen nicht gefunden (Autoload).'];
     }
@@ -387,7 +387,7 @@ function migrate_frontend(string $frontendDir): array
 
     try {
         $runner = new \Tds\CoreFrontendApi\Support\MigrationRunner(
-            \Tds\CoreFrontendApi\Modules::migrationPaths(),
+            \Tds\CoreFrontendApi\Bootstrap::migrationPaths(),
             ['host' => $host, 'port' => $port, 'name' => $name, 'user' => $user, 'pass' => $pass],
             $frontendDir . '/var/migrate',
         );
