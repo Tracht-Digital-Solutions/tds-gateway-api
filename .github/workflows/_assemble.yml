@@ -106,6 +106,8 @@ jobs:
       - uses: actions/checkout@v5
         with: { repository: Tracht-Digital-Solutions/tds-ext-contact-tickets-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-contact-tickets-pkg }
       - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-live-chat-cta-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-live-chat-cta-pkg }
+      - uses: actions/checkout@v5
         with: { repository: Tracht-Digital-Solutions/tds-ext-website-cms-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-website-cms-pkg }
       - uses: actions/checkout@v5
         with: { repository: Tracht-Digital-Solutions/tds-ext-blog-cms-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-blog-cms-pkg }
@@ -249,6 +251,7 @@ jobs:
               "documents":    "$(sha _src/tds-ext-documents-pkg)",
               "support-tickets": "$(sha _src/tds-ext-support-tickets-pkg)",
               "contact-tickets": "$(sha _src/tds-ext-contact-tickets-pkg)",
+              "live-chat-cta": "$(sha _src/tds-ext-live-chat-cta-pkg)",
               "website-cms":  "$(sha _src/tds-ext-website-cms-pkg)",
               "blog-cms":     "$(sha _src/tds-ext-blog-cms-pkg)"
             }
