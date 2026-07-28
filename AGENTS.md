@@ -394,3 +394,28 @@ routing** — an unmatched path routing to `frontend` verbatim, and a 404 only w
 `GATEWAY_DEFAULT_SERVICE` is disabled. `composer test` runs the suite. The
 installer is a standalone script (no unit tests); validate it with `php -l` + a
 built-in-server smoke.
+
+## Tests — routing arithmetic and health parsing
+
+`tests/Config/ServiceTest.php` pins the gateway's routing arithmetic. A mistake
+in those three small methods sends one backend's request to another —
+`/auth/admin/login` arriving at the customer API, or a bare prefix hit arriving
+as an **empty** path the upstream router 404s (hence `pathFor('')` → `/`).
+Covered in both shapes: prefixed services (segment stripped) and the default
+catch-all (forwarded verbatim, since the composed frontend API owns the root
+namespace). Also that `healthUrl()` ignores the rewrite — every backend exposes
+`/healthz` at its ROOT — and that a dotted path like `/.well-known/jwks.json`
+survives intact, since that is how every consumer verifies a JWT.
+
+`tests/Support/HealthBodyTest.php` pins how the gateway spots a backend that is
+UP but not usable. Every probe returns HTTP 200 by contract, so the aggregate
+cannot gate on status alone: a reachable but un-migrated backend answers 200
+while every real query fails, and reports `db: "no-schema"`.
+
+> The `null` return is deliberately **distinct from `"down"`**: it means "this
+> body carries nothing to gate on" — an older backend, or a service with no
+> database — and callers must treat it as *not a failure*. Collapsing the two
+> would 503 the whole gateway the moment one service lags a release. That
+> distinction is asserted from both sides.
+
+Verified by mutation: 17 deliberate breakages introduced, 17 caught.
