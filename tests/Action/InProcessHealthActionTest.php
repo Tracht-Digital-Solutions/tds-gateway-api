@@ -11,6 +11,7 @@ use Slim\Psr7\Response;
 use Tds\ApiGateway\Action\InProcessHealthAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
+use Tds\ApiGateway\Support\Logger;
 
 final class InProcessHealthActionTest extends TestCase
 {
@@ -88,5 +89,32 @@ final class InProcessHealthActionTest extends TestCase
         $body = json_decode((string) $response->getBody(), true);
         self::assertSame(0, $body['services']['/frontend']['status']);
         self::assertCount(3, $body['services']);
+    }
+    public function testBootFailureLogsWhyButNeverReturnsIt(): void
+    {
+        // `status: 0` on its own says a service is down and nothing about the
+        // cause — and this path never reaches DispatchAction, which is the only
+        // other place that logs a dispatch failure. Diagnosing "/frontend is at
+        // status 0" in production meant guessing between a missing directory, an
+        // unreadable vendor/ and a fatal during boot.
+        $logFile = sys_get_temp_dir() . '/gw-health-' . bin2hex(random_bytes(6)) . '.log';
+        $logger = new Logger($logFile, 'warning');
+
+        $dispatcher = $this->dispatcherWith([
+            'auth' => '200', 'customer' => '200', 'frontend' => 'THROW',
+        ]);
+        $action = new InProcessHealthAction($this->registry(), $dispatcher, $logger);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', 'https://api/healthz');
+        $response = $action($request, new Response());
+
+        $body = (string) $response->getBody();
+        // The reason is diagnostic detail with absolute paths in it, and /healthz
+        // is public and unauthenticated. It goes to the log, never to the caller.
+        self::assertStringNotContainsString('cannot boot', $body);
+
+        $log = is_file($logFile) ? (string) file_get_contents($logFile) : '';
+        @unlink($logFile);
+        self::assertStringContainsString('cannot boot', $log, 'the failure reason was not logged');
+        self::assertStringContainsString('/frontend', $log);
     }
 }

@@ -31,6 +31,8 @@ final class InProcessHealthAction
         $services = [];
         $allOk = true;
         $down = [];
+        /** @var array<string, string> service key => why it could not be dispatched */
+        $reasons = [];
 
         foreach ($this->registry->all() as $service) {
             $key = '/' . $service->prefix;
@@ -41,10 +43,19 @@ final class InProcessHealthAction
                 $result = $this->dispatcher->dispatch($probe, $service->prefix, '/healthz');
                 $status = $result->getStatusCode();
                 $db = HealthBody::dbState((string) $result->getBody());
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 // status 0 = the service couldn't be booted/dispatched at all.
                 $status = 0;
                 $db = null;
+                // Capture WHY. This used to be swallowed entirely, so a `status: 0`
+                // in the payload said "it failed" and nothing more — and unlike a
+                // real request, this path never reaches DispatchAction, which is
+                // the only place that logged the detail. Diagnosing a service that
+                // was down here meant guessing at "missing directory / unreadable
+                // vendor / fatal during boot" with no way to tell them apart.
+                // The reason is LOGGED, never returned: /healthz is public and an
+                // exception message carries absolute paths.
+                $reasons[$key] = $e->getMessage();
             }
 
             // Gate on the self-reported db state too: each backend /healthz
@@ -62,7 +73,17 @@ final class InProcessHealthAction
         }
 
         if ($down !== []) {
-            $this->logger?->warning('health check: service(s) down', ['down' => $down]);
+            $context = ['down' => $down];
+            if ($reasons !== []) {
+                $context['reasons'] = $reasons;
+            }
+            $this->logger?->warning('health check: service(s) down', $context);
+            // error_log() as well, mirroring DispatchAction: on the Plesk host the
+            // file sink is the thing most likely to be misconfigured, and this is
+            // exactly the moment you need the message.
+            foreach ($reasons as $key => $reason) {
+                error_log("[gateway] health: {$key} could not be dispatched: {$reason}");
+            }
         }
 
         $response->getBody()->write((string) json_encode([

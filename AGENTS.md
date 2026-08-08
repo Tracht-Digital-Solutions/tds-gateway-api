@@ -66,6 +66,13 @@ big picture.
   `Action\InProcessHealthAction` runs each service's `/healthz` in-process and
   aggregates (a boot/dispatch failure = status 0), same JSON shape as the proxy
   `HealthAction`.
+  **A status-0 service logs WHY** — to `logs/gateway.log` *and* `error_log()`,
+  never into the response, because `/healthz` is public and an exception message
+  carries absolute paths. Before that, the aggregate said `status: 0` and nothing
+  else, and this path never reaches `DispatchAction` (the only other place that
+  logged a dispatch failure), so a service down in production was indistinguishable
+  between "directory missing", "vendor/ unreadable" and "fatal during boot". If you
+  are looking at a red `/healthz`, read the log line — it names the cause directly.
 - The dispatcher takes an **injectable app-resolver** (`callable(dir, fqcn): App`)
   so the unit tests supply a fake app + fake `.env` without any sibling repo
   checked out.
