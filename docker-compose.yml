@@ -57,6 +57,7 @@ services:
         ext_documents: ../tds-ext-documents-pkg
         ext_support_tickets: ../tds-ext-support-tickets-pkg
         ext_contact_tickets: ../tds-ext-contact-tickets-pkg
+        ext_live_chat_cta: ../tds-ext-live-chat-cta-pkg
         ext_website_cms: ../tds-ext-website-cms-pkg
         ext_blog_cms: ../tds-ext-blog-cms-pkg
     restart: unless-stopped

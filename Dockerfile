@@ -25,6 +25,7 @@
 #     --build-context ext_documents=../tds-ext-documents-pkg \
 #     --build-context ext_support_tickets=../tds-ext-support-tickets-pkg \
 #     --build-context ext_contact_tickets=../tds-ext-contact-tickets-pkg \
+#     --build-context ext_live_chat_cta=../tds-ext-live-chat-cta-pkg \
 #     --build-context ext_website_cms=../tds-ext-website-cms-pkg \
 #     --build-context ext_blog_cms=../tds-ext-blog-cms-pkg \
 #     -t tds-api .
@@ -55,6 +56,7 @@ COPY --from=ext_projects      . ./tds-ext-projects-pkg/
 COPY --from=ext_documents     . ./tds-ext-documents-pkg/
 COPY --from=ext_support_tickets . ./tds-ext-support-tickets-pkg/
 COPY --from=ext_contact_tickets . ./tds-ext-contact-tickets-pkg/
+COPY --from=ext_live_chat_cta . ./tds-ext-live-chat-cta-pkg/
 COPY --from=ext_website_cms   . ./tds-ext-website-cms-pkg/
 COPY --from=ext_blog_cms      . ./tds-ext-blog-cms-pkg/
 
@@ -64,7 +66,27 @@ COPY --from=ext_blog_cms      . ./tds-ext-blog-cms-pkg/
 # (copy, don't symlink) them into vendor/ so the image is self-contained, and
 # `composer update` so the tips of the sibling checkouts win over the lock. It
 # already carries phinx in `require`.
+#
+# RUNTIME_PHP pins what Composer RESOLVES FOR. This image resolves in
+# `composer:2`, whose bundled PHP is newer than the `php:8.3` runtime below —
+# and the frontend is the one service installed with `composer update` (free
+# resolution, so the sibling checkouts win over its lock). Without this it
+# happily picked packages requiring PHP >= 8.4.1, Composer wrote that into
+# `vendor/composer/platform_check.php`, and the runtime then FATALED on
+# `require vendor/autoload.php` — before a single line of our code ran. In the
+# gateway that surfaces as `"/frontend": {"status": 0}` in /healthz and a 502
+# on every route, with nothing in the app logs, because the failure happens
+# inside the autoloader.
+#
+# Keep this equal to the runtime stage's PHP. CI pins the same version
+# (_assemble.yml `php-version`), which is what keeps the released bundle
+# loadable on the production host — this line gives the image the same
+# guarantee instead of inheriting whatever the builder happens to ship.
+ARG RUNTIME_PHP=8.3
 RUN set -eux; \
+    for d in gateway auth customer frontend; do \
+      composer config --working-dir="/build/$d" platform.php "$RUNTIME_PHP"; \
+    done; \
     for d in gateway auth customer; do \
       rm -rf "/build/$d/vendor" "/build/$d/.git"; \
       composer install --working-dir="/build/$d" \

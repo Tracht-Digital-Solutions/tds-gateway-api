@@ -10,6 +10,15 @@
 # Secrets come from the container environment (compose `environment:` /
 # `env_file:`); anything unset falls back to a dev-safe placeholder so a bare
 # `docker compose up` still boots end-to-end.
+#
+# QUOTE every generated value that can contain a space. phpdotenv refuses a bare
+# unquoted spaced value ("Failed to parse dotenv file. Encountered unexpected
+# whitespace at [...]") and `Bootstrap::createApp()` calls `Dotenv->load()`
+# before anything else — so one such line takes the WHOLE service down at boot,
+# not just the setting it belongs to. `MAIL_FROM_NAME=Tracht Digital Solutions`
+# did exactly that to the frontend: auth and customer, whose values happen to
+# have no spaces, stayed green while every frontend route returned 500 and the
+# gateway's aggregate health reported `"/frontend": {"status": 0}`.
 
 set -eu
 
@@ -46,14 +55,14 @@ DB_USER=$DB_USER
 DB_PASS=$DB_PASS
 ADMIN_TOKEN=$ADMIN_TOKEN
 JWT_KEY_ID=${JWT_KEY_ID:-tds-auth-dev-1}
-JWT_ISSUER=${JWT_ISSUER:-http://127.0.0.1:8000/auth}
+JWT_ISSUER="${JWT_ISSUER:-http://127.0.0.1:8000/auth}"
 JWT_TTL_SECONDS=${JWT_TTL_SECONDS:-3600}
 JWT_REFRESH_TTL_SECONDS=${JWT_REFRESH_TTL_SECONDS:-2592000}
 COOKIE_DOMAIN=${COOKIE_DOMAIN:-localhost}
 COOKIE_NAME=${COOKIE_NAME:-tds_session}
 LOGIN_RATE_LIMIT=${LOGIN_RATE_LIMIT:-10}
 LOGIN_RATE_WINDOW_SECONDS=${LOGIN_RATE_WINDOW_SECONDS:-900}
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
 EOF
 # JWT_PRIVATE_KEY only when provided; otherwise auth falls back to keys/private.pem (below).
 if [ -n "${JWT_PRIVATE_KEY:-}" ] && ! grep -q '^JWT_PRIVATE_KEY=' "$SERVICES_DIR/auth/.env" 2>/dev/null; then
@@ -79,7 +88,7 @@ STRIPE_PUBLIC_KEY=${STRIPE_PUBLIC_KEY:-}
 STRIPE_RETURN_URL=${STRIPE_RETURN_URL:-http://localhost:4321/invoices}
 DOCUMENT_ROOT_DIR=${DOCUMENT_ROOT_DIR:-/srv/tds/var/customer-files}
 DOCUMENT_SIGN_SECRET=${DOCUMENT_SIGN_SECRET:-dev-document-sign-secret-change-me}
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
 EOF
 
 # frontend = tds-core-frontend-api (composed base + extensions; the gateway's
@@ -97,11 +106,11 @@ AUTH_API_URL=$AUTH_API_URL
 JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-600}
 SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
 MAIL_DSN=${MAIL_DSN:-}
-MAIL_FROM=${MAIL_FROM:-no-reply@tracht-digital.de}
-MAIL_FROM_NAME=${MAIL_FROM_NAME:-Tracht Digital Solutions}
+MAIL_FROM="${MAIL_FROM:-no-reply@tracht-digital.de}"
+MAIL_FROM_NAME="${MAIL_FROM_NAME:-Tracht Digital Solutions}"
 DOCUMENT_ROOT_DIR=${DOCUMENT_ROOT_DIR:-/srv/tds/var/customer-files}
 DOCUMENT_SIGN_SECRET=${DOCUMENT_SIGN_SECRET:-dev-document-sign-secret-change-me}
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
 EOF
 
 # Storage dirs the services expect to be writable.

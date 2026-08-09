@@ -112,6 +112,43 @@ Migrationen laufen bei jedem Containerstart erneut (idempotent). Den Code
 aktualisierst du mit `docker compose up --build` (zieht den aktuellen Stand
 der `../tds-*`-Checkouts).
 
+## Was der Build aus den Nachbar-Repos NICHT mitnimmt
+
+Jedes als Build-Kontext genutzte Repo (`../tds-auth-api`, `../tds-customer-api`,
+`../tds-core-frontend-api`, `../tds-frontend-contract-pkg`, alle 14
+`../tds-ext-*-pkg`) hat eine eigene `.dockerignore`. Drei Einträge darin sind
+nicht bloß Kosmetik — ohne sie **lügt der Container über sich selbst**:
+
+| Ausgeschlossen | Sonst passiert |
+|---|---|
+| `node_modules`, `vendor`, `.git`, `dist` | Der Kontext-Transfer dauert länger als der ganze Rest des Images (eine Extension allein: 150 MB+) |
+| `.env` | Die lokale Entwickler-`.env` landet im Image, der Entrypoint meldet *„keeping existing .env"* und schreibt die Container-Defaults **nicht** — der Dienst zeigt auf eine Datenbank, die es dort nicht gibt, und die Zugangsdaten stecken in einem Image-Layer |
+| `var` | Darin liegt der Marker des In-Process-Auto-Migrators (`.migrated-<hash>`). Mitkopiert hält er eine **frische, leere** Datenbank für migriert und überspringt alles. Symptom: Dienst startet grün und wirft bei der ersten Abfrage *„Base table or view not found"* |
+
+Zwei weitere Fallen, beide im Container reproduziert:
+
+**PHP-Version, für die Composer auflöst.** Der Dockerfile pinnt sie über
+`ARG RUNTIME_PHP`. Das Builder-Image (`composer:2`) bringt eine neuere
+PHP-Version mit als die Laufzeit (`php:8.3`); ohne den Pin wählt Composer für
+den Frontend-Dienst — den einzigen, der mit `composer update` installiert wird
+— Pakete, die PHP ≥ 8.4 verlangen. Composer schreibt das in
+`vendor/composer/platform_check.php`, und die Laufzeit stirbt schon beim
+`require vendor/autoload.php`. Sichtbar ist davon nur
+`"/frontend": {"status": 0}` in `/healthz` plus 502 auf jeder Route — kein
+einziger Eintrag im Anwendungslog, weil der Fehler im Autoloader passiert.
+Halte den Wert gleich der PHP-Version der Runtime-Stage (und gleich dem
+`php-version` in `_assemble.yml`, das die ausgelieferte Variante schützt).
+
+**Werte mit Leerzeichen in einer generierten `.env` gehören in
+Anführungszeichen.** phpdotenv lehnt einen unquotierten Wert mit Leerzeichen ab
+(*„Failed to parse dotenv file. Encountered unexpected whitespace at […]"*), und
+`Bootstrap::createApp()` lädt die `.env` als Allererstes — eine solche Zeile
+reißt damit den **kompletten Dienst** beim Start um, nicht nur die betroffene
+Einstellung. `MAIL_FROM_NAME=Tracht Digital Solutions` hat genau das getan:
+auth und customer, deren Werte zufällig keine Leerzeichen enthalten, blieben
+grün, während jede Frontend-Route 500 lieferte.
+
+
 ## Production-Hinweis
 
 Das Image eignet sich auch für Single-Host-Prod: echte Secrets in
