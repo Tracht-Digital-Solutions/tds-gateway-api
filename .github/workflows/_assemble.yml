@@ -176,6 +176,16 @@ jobs:
             echo "::endgroup::"
           done
 
+      # In-process mode loads every service's autoloader into ONE PHP process,
+      # and Composer autoloaders are first-come-first-served per class name — so
+      # for a package two services share, whichever is dispatched first wins for
+      # both. That went unnoticed while `symfony/mailer` was a whole MAJOR apart
+      # between customer and frontend (tds-gateway-api#8). Fails on a major
+      # mismatch; minor/patch drift is reported and allowed, because the
+      # services are locked independently by design.
+      - name: Check shared dependencies across services
+        run: php scripts/check-shared-deps.php _src/auth _src/customer _src/frontend
+
       - name: Assemble bundle
         run: |
           set -euo pipefail

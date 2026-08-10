@@ -134,11 +134,28 @@ big picture.
   raw string). Fine for current upload sizes (blog covers, customer docs);
   revisit with streaming if large uploads land. In-process mode passes the PSR-7
   request straight through (uploads via `getUploadedFiles()`), so no extra copy.
-- **In-process autoloader: keep the per-service `vendor/` versions in lockstep.**
-  Each request loads one service's autoloader; shared libs (Slim/php-di/phpdotenv)
-  load once and "first loaded wins" for the worker. Because the bundle is
-  assembled from all repos at once with identical constraints the copies match —
-  don't introduce a service that pins a divergent Slim/php-di/phpdotenv major.
+- **In-process autoloader: shared packages are decided by DISPATCH ORDER, and
+  `scripts/check-shared-deps.php` is what keeps that honest.**
+  Each request loads one service's autoloader; shared libs (Slim/php-di/
+  phpdotenv/symfony) load once and "first loaded wins" for the worker. The
+  aggregate `/healthz` dispatches auth → customer → frontend in one process, so
+  the winner is picked by registry order — something no service author can see
+  from their own repo.
+  > This bullet used to claim the copies match "because the bundle is assembled
+  > from all repos at once with identical constraints". **They were not
+  > identical.** Diffing the three assembled locks found **33** shared packages
+  > at differing versions, and `symfony/mailer` a whole MAJOR apart — the
+  > frontend requiring `^6.4` while customer resolved `^7.4`, so the frontend
+  > ran against customer's Symfony 7 classes (reproduced in the Docker stack).
+  > It survived only because the few methods it calls did not change between the
+  > majors. Aligned in tds-core-frontend-api 0.11.0; see tds-gateway-api#8.
+  The assemble now runs `scripts/check-shared-deps.php _src/auth _src/customer
+  _src/frontend`, which **fails the build on a major mismatch** and merely
+  reports minor/patch drift — the services are locked independently by design,
+  so exact equality is not reachable without one shared lock. Pass the service
+  directories explicitly; the checkout also holds the contract and all 14
+  extensions, several with their own `composer.lock`, and those are mirrored
+  into the frontend's vendor rather than loaded as separate processes.
   `frontend` composes its extensions via Composer `path` repos; the assemble
   step mirrors (copies) them into its `vendor/` (`COMPOSER_MIRROR_PATH_REPOS=1`)
   so the bundle ships no dangling symlinks.
