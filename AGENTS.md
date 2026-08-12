@@ -301,6 +301,28 @@ That asymmetric failure is the tell for an unset/expired token.
 - Writes `services/<name>/.env` (+ gateway `.env`) for **auth, customer, frontend**
   from the same templates as the `.env.example`s / `deploy/docker-entrypoint.sh`;
   keep all three in sync when a service gains an env var.
+- **Every generated line goes through `env_line()`, which QUOTES and escapes the
+  value — never string-interpolate a value into the `.env` body.** phpdotenv
+  refuses a bare unquoted value containing a space, and each service's
+  `Bootstrap::createApp()` loads the `.env` *before anything else*, so one such
+  line takes the WHOLE service down at boot rather than just breaking its own
+  setting. Until 0.4.8 `env_for()` emitted `MAIL_FROM_NAME=Tracht Digital
+  Solutions` unquoted, so **every fresh install left the frontend dead**:
+  `/healthz` reported `"/frontend": {"status": 0}`, every catch-all route
+  answered `500 Slim Application Error`, and nothing appeared in the app log
+  (the failure precedes the error handler). auth and customer stayed green only
+  because their values happen to contain no spaces — which is exactly what made
+  it read as a frontend bug. `deploy/docker-entrypoint.sh` had already been
+  fixed for this; the installer was missed. Escaping is `\` → `\\`, `"` → `\"`,
+  `$` → `\$`; the `$` escape matters beyond parsing, since phpdotenv
+  interpolates `${VAR}` inside double quotes and would otherwise silently
+  rewrite a generated password. `read_env_kv()` is the exact INVERSE and must
+  stay so — it feeds the DB credentials to the migration steps, so if it stopped
+  unescaping, a password containing `$`/`"`/`\` would migrate against the wrong
+  credentials while the services themselves connected fine.
+  `tests/Support/InstallEnvFileTest.php` pins all of this (it extracts the
+  installer's helpers via the tokenizer, since `install.php` is a single file
+  that `session_start()`s at top level and cannot be included).
 - **Only installation-relevant secrets are set here.** Step 3 no longer collects
   third-party service keys (Stripe, DeepL, Lexware, GitHub blog-rebuild) — those
   are configured at runtime in the admin frontend („Einstellungen“) and stored

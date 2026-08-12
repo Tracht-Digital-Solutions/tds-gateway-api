@@ -111,35 +111,76 @@ function php_cli_binary(): string
     return 'php';
 }
 
+/**
+ * Render one `KEY="value"` .env line, quoted and escaped.
+ *
+ * ALWAYS use this instead of interpolating a value into the file body. phpdotenv
+ * refuses a bare unquoted value that contains a space ("Failed to parse dotenv
+ * file. Encountered unexpected whitespace at [...]"), and every service's
+ * `Bootstrap::createApp()` calls `Dotenv->load()` before anything else — so a
+ * single such line takes the WHOLE service down at boot, not just the setting it
+ * belongs to. That is exactly what `MAIL_FROM_NAME=Tracht Digital Solutions` did
+ * to the frontend on every fresh install: auth and customer, whose values happen
+ * to contain no spaces, stayed green while the gateway's aggregate health
+ * reported `"/frontend": {"status": 0}` and every catch-all route 500'd.
+ *
+ * Escaping inside the double quotes (verified against vlucas/phpdotenv ^5.6):
+ *   \  → \\   " → \"   $ → \$   and CR/LF are stripped (a .env line is a line).
+ * The `$` escape matters beyond parsing: phpdotenv interpolates `${VAR}` in a
+ * double-quoted value, so an unescaped `$` in a generated password or secret
+ * would be silently rewritten rather than merely mis-parsed.
+ */
+function env_line(string $key, string $value): string
+{
+    $v = str_replace(["\r", "\n"], '', $value);
+    $v = str_replace('\\', '\\\\', $v);
+    $v = str_replace('"', '\\"', $v);
+    $v = str_replace('$', '\\$', $v);
+    return $key . '="' . $v . '"' . "\n";
+}
+
+/** Render a whole .env body from an ordered key => value map. */
+function env_body(array $pairs): string
+{
+    $out = '';
+    foreach ($pairs as $key => $value) {
+        $out .= env_line($key, (string) $value);
+    }
+    return $out;
+}
+
 /** Build a services/<name>/.env file body from the collected config. */
 function env_for(string $name, array $c): string
 {
-    $base = "APP_ENV=production\n"
-        . "DB_HOST={$c['db_host']}\n"
-        . "DB_PORT={$c['db_port']}\n"
-        . "DB_USER={$c['db_user']}\n"
-        . "DB_PASS={$c['db_pass']}\n";
+    $base = [
+        'APP_ENV' => 'production',
+        'DB_HOST' => $c['db_host'],
+        'DB_PORT' => $c['db_port'],
+        'DB_USER' => $c['db_user'],
+        'DB_PASS' => $c['db_pass'],
+    ];
 
     switch ($name) {
         case 'auth':
-            return $base
-                . "DB_NAME={$c['db_auth']}\n"
-                . "ADMIN_TOKEN={$c['admin_token']}\n"
-                . "JWT_PRIVATE_KEY=\n"
-                . "JWT_KEY_ID={$c['jwt_key_id']}\n"
-                . "JWT_ISSUER={$c['jwt_issuer']}\n"
-                . "JWT_TTL_SECONDS=3600\n"
-                . "JWT_REFRESH_TTL_SECONDS=2592000\n"
-                . "COOKIE_DOMAIN={$c['cookie_domain']}\n"
-                . "COOKIE_NAME=tds_session\n"
-                . "LOGIN_RATE_LIMIT=10\n"
-                . "LOGIN_RATE_WINDOW_SECONDS=900\n"
+            return env_body($base + [
+                'DB_NAME' => $c['db_auth'],
+                'ADMIN_TOKEN' => $c['admin_token'],
+                'JWT_PRIVATE_KEY' => '',
+                'JWT_KEY_ID' => $c['jwt_key_id'],
+                'JWT_ISSUER' => $c['jwt_issuer'],
+                'JWT_TTL_SECONDS' => '3600',
+                'JWT_REFRESH_TTL_SECONDS' => '2592000',
+                'COOKIE_DOMAIN' => $c['cookie_domain'],
+                'COOKIE_NAME' => 'tds_session',
+                'LOGIN_RATE_LIMIT' => '10',
+                'LOGIN_RATE_WINDOW_SECONDS' => '900',
                 // Bootstrap-Admin-Identität dokumentieren, damit ein späterer
                 // manueller `composer create-admin` / Seed dieselbe Kennung nutzt.
                 // Das Konto selbst legt der Installer direkt an (create_admin-Schritt);
                 // das Passwort steht bewusst NICHT im Klartext in der .env.
-                . "ADMIN_BOOTSTRAP_EMAIL={$c['admin_email']}\n"
-                . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
+                'ADMIN_BOOTSTRAP_EMAIL' => $c['admin_email'],
+                'CORS_ALLOWED_ORIGINS' => $c['cors'],
+            ]);
         case 'frontend':
             // tds-core-frontend-api — the composed base + extensions that
             // replaced the archived content/contact backends. It is the default
@@ -148,31 +189,33 @@ function env_for(string $name, array $c): string
             // „Einstellungen“, encrypted under SETTINGS_ENCRYPTION_KEY. It
             // auto-migrates its extensions' schema in-process on the first
             // request (AUTO_MIGRATE defaults to 1).
-            return $base
-                . "DB_NAME={$c['db_frontend']}\n"
-                . "AUTH_API_URL={$c['auth_api_url']}\n"
-                . "JWKS_CACHE_TTL=600\n"
-                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
-                . "MAIL_DSN=\n"
-                . "MAIL_FROM=no-reply@tracht-digital.de\n"
-                . "MAIL_FROM_NAME=Tracht Digital Solutions\n"
-                . "DOCUMENT_ROOT_DIR={$c['document_root_dir']}\n"
-                . "DOCUMENT_SIGN_SECRET={$c['document_sign_secret']}\n"
-                . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
+            return env_body($base + [
+                'DB_NAME' => $c['db_frontend'],
+                'AUTH_API_URL' => $c['auth_api_url'],
+                'JWKS_CACHE_TTL' => '600',
+                'SETTINGS_ENCRYPTION_KEY' => $c['settings_encryption_key'],
+                'MAIL_DSN' => '',
+                'MAIL_FROM' => 'no-reply@tracht-digital.de',
+                'MAIL_FROM_NAME' => 'Tracht Digital Solutions',
+                'DOCUMENT_ROOT_DIR' => $c['document_root_dir'],
+                'DOCUMENT_SIGN_SECRET' => $c['document_sign_secret'],
+                'CORS_ALLOWED_ORIGINS' => $c['cors'],
+            ]);
         case 'customer':
             // Stripe keys are set at runtime in the admin panel, encrypted under
             // SETTINGS_ENCRYPTION_KEY.
-            return $base
-                . "DB_NAME={$c['db_customer']}\n"
-                . "AUTH_API_URL={$c['auth_api_url']}\n"
-                . "JWKS_CACHE_TTL=600\n"
-                . "ADMIN_TOKEN={$c['admin_token']}\n"
-                . "SETTINGS_ENCRYPTION_KEY={$c['settings_encryption_key']}\n"
-                . "DOCUMENT_ROOT_DIR={$c['document_root_dir']}\n"
-                . "DOCUMENT_SIGN_SECRET={$c['document_sign_secret']}\n"
-                . "CORS_ALLOWED_ORIGINS={$c['cors']}\n";
+            return env_body($base + [
+                'DB_NAME' => $c['db_customer'],
+                'AUTH_API_URL' => $c['auth_api_url'],
+                'JWKS_CACHE_TTL' => '600',
+                'ADMIN_TOKEN' => $c['admin_token'],
+                'SETTINGS_ENCRYPTION_KEY' => $c['settings_encryption_key'],
+                'DOCUMENT_ROOT_DIR' => $c['document_root_dir'],
+                'DOCUMENT_SIGN_SECRET' => $c['document_sign_secret'],
+                'CORS_ALLOWED_ORIGINS' => $c['cors'],
+            ]);
     }
-    return $base;
+    return env_body($base);
 }
 
 /** Generate the auth RS256 keypair (no-op if it already exists). */
@@ -325,7 +368,17 @@ function run_migration(string $serviceDir, int $timeout = 120): array
     return [$code === 0, trim($out)];
 }
 
-/** Minimal `.env` reader — KEY=VALUE, ignores comments/quotes. */
+/**
+ * Minimal `.env` reader — KEY=VALUE, ignores comments, unwraps quotes.
+ *
+ * This is the exact INVERSE of {@see env_line()} and must stay that way: it
+ * feeds the DB credentials for the migration steps, so if it did not undo the
+ * escaping that env_line() applies, a password containing `$`, `"` or `\` would
+ * be read back with stray backslashes and every migration would fail to
+ * authenticate — while the services themselves (which parse the same file with
+ * real phpdotenv) connected fine. Mirrors phpdotenv's double-quote semantics:
+ * `\\` → `\`, `\"` → `"`, `\$` → `$`; a single-quoted value is literal.
+ */
 function read_env_kv(string $file): array
 {
     if (!is_file($file)) {
@@ -344,7 +397,9 @@ function read_env_kv(string $file): array
         $key = trim(substr($line, 0, $eq));
         $val = trim(substr($line, $eq + 1));
         $len = strlen($val);
-        if ($len >= 2 && ($val[0] === '"' || $val[0] === "'") && $val[$len - 1] === $val[0]) {
+        if ($len >= 2 && $val[0] === '"' && $val[$len - 1] === '"') {
+            $val = str_replace(['\\\\', '\\"', '\\$'], ['\\', '"', '$'], substr($val, 1, -1));
+        } elseif ($len >= 2 && $val[0] === "'" && $val[$len - 1] === "'") {
             $val = substr($val, 1, -1);
         }
         $out[$key] = $val;
@@ -446,7 +501,7 @@ function run_task(string $id, array $c, string $gatewayDir, string $servicesDir,
             // GATEWAY_DEFAULT_SERVICE have baked defaults (auth,customer,frontend
             // / frontend), so a minimal .env is enough.
             $ok = @file_put_contents($gatewayDir . '/.env',
-                "APP_ENV=production\n") !== false;
+                env_body(['APP_ENV' => 'production'])) !== false;
             return [$ok, $ok ? 'gateway/.env geschrieben.' : 'Konnte gateway/.env nicht schreiben.'];
 
         case 'env_auth':
