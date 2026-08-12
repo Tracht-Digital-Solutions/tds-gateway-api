@@ -4,6 +4,41 @@ Das mitgelieferte `Dockerfile` packt das Gateway **und** die Backends in ein
 einziges Image; `docker-compose.yml` ergänzt MariaDB. Ein Befehl bringt die
 komplette API-Plattform hoch.
 
+## Ein Prozess für alle Backends (Default)
+
+Der Container läuft standardmäßig mit `GATEWAY_MODE=inprocess`: das Gateway lädt
+die Slim-App jedes Services **in seinen eigenen Prozess**. Es läuft also genau
+ein `php -S` — kein Service-Prozess, keine Loopback-Ports. Das entspricht dem
+Produktions-Host (eine PHP-FPM-App).
+
+Bis v0.4.9 startete supervisord trotzdem *immer* alle vier Prozesse, obwohl der
+Default schon `inprocess` war. Die drei Loopback-Server auf 8003/8004/8100 liefen
+also dauerhaft mit und wurden **nie angesprochen** — sie antworteten aber auf
+ihren Ports und sahen dadurch beim Debuggen wie der echte Request-Pfad aus.
+Seit v0.4.10 hängen sie an `TDS_BACKEND_AUTOSTART`, das der Entrypoint aus
+`GATEWAY_MODE` ableitet.
+
+Prüfen, was tatsächlich läuft:
+
+```bash
+docker logs tds-gateway-api-api-1 | grep GATEWAY_MODE
+# [entrypoint] GATEWAY_MODE=inprocess (loopback backends autostart: false)
+```
+
+Proxy-Modus (getrennte Prozesse) für Debugging — über `.env.docker`, **nicht**
+über eine Shell-Variable:
+
+```bash
+echo "GATEWAY_MODE=proxy" > .env.docker
+docker compose up -d --force-recreate api
+```
+
+> **`GATEWAY_MODE` bewusst nicht in `docker-compose.yml` gemappt.** Compose
+> substituiert aus der Projekt-`.env` — und das ist hier die *lokale App-Konfig*
+> für `composer start`, die noch `GATEWAY_MODE=proxy` und die alte
+> `GATEWAY_SERVICES`-Liste von vor dem Cutover enthält. Ein Mapping ließe diese
+> veraltete Datei still den Container-Modus umschalten.
+
 ## Voraussetzungen
 
 - Docker mit BuildKit (Docker 23+ / `docker compose` v2 — Standard heute).

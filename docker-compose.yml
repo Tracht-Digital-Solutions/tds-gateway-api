@@ -69,6 +69,13 @@ services:
       DB_PORT: "3306"
       DB_USER: ${DB_USER:-tds}
       DB_PASS: ${DB_PASS:-tds}
+      # NB: do NOT map GATEWAY_MODE through here as ${GATEWAY_MODE:-inprocess}.
+      # Compose substitutes from the project's ./.env, which in this repo is the
+      # *gateway app's* local config for `composer start` — it still carries
+      # GATEWAY_MODE=proxy and the pre-cutover GATEWAY_SERVICES list. Mapping it
+      # let that stale file silently switch the container's run mode. The
+      # container defaults to inprocess in the entrypoint; override it in
+      # ./.env.docker (below), which exists for exactly this.
     env_file:
       - path: ./.env.docker
         required: false

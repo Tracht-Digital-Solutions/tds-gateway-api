@@ -139,5 +139,25 @@ echo "[entrypoint] running migrations…"
 TDS_SERVICES_DIR="$SERVICES_DIR" PHP_BIN=php sh /srv/tds/gateway/bin/migrate-stack.sh \
   || echo "[entrypoint] WARN: some migrations failed — starting anyway."
 
+# --- run mode --------------------------------------------------------------
+# One instance by default: `inprocess` makes the gateway load each service's
+# Slim app inside its own process, so the loopback servers are dead weight —
+# supervisor only starts them for GATEWAY_MODE=proxy (see
+# deploy/supervisord.docker.conf, which reads TDS_BACKEND_AUTOSTART).
+#
+# Exported, not merely defaulted in the app: supervisor fails to start if a
+# %(ENV_…)s referenced in its config is unset, and an explicit GATEWAY_MODE in
+# the container environment is visible to `docker exec … printenv`, which is
+# where you look when the request path is in doubt.
+GATEWAY_MODE="${GATEWAY_MODE:-inprocess}"
+export GATEWAY_MODE
+if [ "$GATEWAY_MODE" = "proxy" ]; then
+  TDS_BACKEND_AUTOSTART=true
+else
+  TDS_BACKEND_AUTOSTART=false
+fi
+export TDS_BACKEND_AUTOSTART
+echo "[entrypoint] GATEWAY_MODE=$GATEWAY_MODE (loopback backends autostart: $TDS_BACKEND_AUTOSTART)"
+
 echo "[entrypoint] starting processes…"
 exec "$@"

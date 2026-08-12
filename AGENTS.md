@@ -31,6 +31,17 @@ big picture.
   + health action differ. The gateway owns **no** routes of its own beyond those
   two — it is a pure transparent router (the API wiki now lives in the frontend
   API's `/wiki.json`, not here).
+  - **The Docker stack must not start service processes in the default mode.**
+    `inprocess` means one `php -S` serves everything, but supervisord started all
+    four unconditionally until 0.4.10 — three PHP processes that were never
+    dialled, yet answered on 8003/8004/8100 and so read as the live request path
+    while debugging. The three backends now key off `TDS_BACKEND_AUTOSTART`,
+    which `deploy/docker-entrypoint.sh` derives from `GATEWAY_MODE` and logs at
+    startup. **Do not map `GATEWAY_MODE` into `docker-compose.yml`'s
+    `environment:`** — Compose substitutes from the project `.env`, which in this
+    repo is the gateway *app's* local `composer start` config and still carries
+    `GATEWAY_MODE=proxy` plus the pre-cutover `GATEWAY_SERVICES`; mapping it let
+    that stale file silently flip the container. Override via `.env.docker`.
 - `Config\ServiceRegistry` is the routing table (prefix → `Service`), built
   from env with baked defaults for the current backends. `match($path)` returns
   `[Service, $remainder]`: an explicit prefix (`auth`/`customer`) strips the
@@ -73,6 +84,19 @@ big picture.
   logged a dispatch failure), so a service down in production was indistinguishable
   between "directory missing", "vendor/ unreadable" and "fatal during boot". If you
   are looking at a red `/healthz`, read the log line — it names the cause directly.
+  **`status: 0` always means the service threw before answering** — in practice a
+  malformed `.env` (see the installer section) or a missing `services/<name>/vendor/`.
+  It is NOT a migration failure: `MigrationRunner::ensureMigrated()` catches
+  everything internally, so the auto-migrator can never take a service down.
+- **Gating on the self-reported `db` only works if the backend reports it.**
+  `Support\HealthBody` reads `db` and the aggregate flips to 503 on
+  `down`/`no-schema`; a body without the key means "nothing to gate on".
+  `tds-core-frontend-api` never sent one, so a frontend pointed at a dead or
+  un-migrated database reported `{"ok":true,"status":200}` and the whole API
+  looked healthy while every route 500'd — the exact hole this gating exists to
+  close (gateway#4), left open for the one service that carries all the module
+  routes. Fixed in core-frontend-api 0.11.2. Any new backend must answer
+  `/healthz` with `db` = `ok`/`no-schema`/`down`.
 - The dispatcher takes an **injectable app-resolver** (`callable(dir, fqcn): App`)
   so the unit tests supply a fake app + fake `.env` without any sibling repo
   checked out.
