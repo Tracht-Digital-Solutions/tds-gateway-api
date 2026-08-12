@@ -273,7 +273,24 @@ final class MigrationRunner
         }
     }
 
-    /** Minimal `.env` reader — KEY=VALUE, ignores comments; never touches globals. */
+    /**
+     * Minimal `.env` reader — KEY=VALUE, ignores comments; never touches globals.
+     *
+     * Supplies the DB credentials for the auth/customer migrations, so it MUST
+     * decode a value exactly as the services' own phpdotenv does. It previously
+     * stripped the quotes but left the escaping in place, which was invisible
+     * while the installer wrote values raw. Once `install.php` began quoting and
+     * escaping (`\` → `\\`, `"` → `\"`, `$` → `\$`), a DB password containing any
+     * of those came back here with a stray backslash and Phinx failed with
+     * `SQLSTATE[HY000] [1045] Access denied` — while the service itself, reading
+     * the same file with real phpdotenv, connected fine. The frontend migrated
+     * happily throughout, because its installer path uses install.php's
+     * `read_env_kv()`, which had already been made the exact inverse.
+     *
+     * Mirrors phpdotenv's double-quote semantics; a single-quoted value is
+     * literal. Keep this in lockstep with `install.php`'s `read_env_kv()` —
+     * `tests/Support/InstallEnvFileTest.php` asserts both agree with phpdotenv.
+     */
     private static function readEnvFile(string $file): array
     {
         if (!is_file($file)) {
@@ -292,7 +309,9 @@ final class MigrationRunner
             $key = trim(substr($line, 0, $eq));
             $val = trim(substr($line, $eq + 1));
             $len = strlen($val);
-            if ($len >= 2 && ($val[0] === '"' || $val[0] === "'") && $val[$len - 1] === $val[0]) {
+            if ($len >= 2 && $val[0] === '"' && $val[$len - 1] === '"') {
+                $val = str_replace(['\\\\', '\\"', '\\$'], ['\\', '"', '$'], substr($val, 1, -1));
+            } elseif ($len >= 2 && $val[0] === "'" && $val[$len - 1] === "'") {
                 $val = substr($val, 1, -1);
             }
             $out[$key] = $val;

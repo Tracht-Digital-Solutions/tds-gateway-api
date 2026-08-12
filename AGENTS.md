@@ -347,6 +347,18 @@ That asymmetric failure is the tell for an unset/expired token.
   `tests/Support/InstallEnvFileTest.php` pins all of this (it extracts the
   installer's helpers via the tokenizer, since `install.php` is a single file
   that `session_start()`s at top level and cannot be included).
+  - **There are TWO hand-rolled readers, and BOTH must match the writer.**
+    `install.php`'s `read_env_kv()` serves the *frontend* migration;
+    `Support\MigrationRunner::readEnvFile()` serves the *auth + customer*
+    migrations **and** the gateway's request-time auto-migrate. Only the first
+    was updated when `env_line()` started escaping, and a real install showed
+    exactly what that costs: the host's DB password contained a `$`, so
+    `frontend` applied all 31 migrations while auth and customer both died with
+    `SQLSTATE[HY000] [1045] Access denied` — same credentials, same file, three
+    different parsers (the services themselves use real phpdotenv and were
+    fine). Anything reading a generated `.env` without phpdotenv must undo
+    `\\`, `\"` and `\$`. The test asserts **both** readers agree with phpdotenv
+    key-by-key over a hostile config, so a third reader cannot drift silently.
 - **Only installation-relevant secrets are set here.** Step 3 no longer collects
   third-party service keys (Stripe, DeepL, Lexware, GitHub blog-rebuild) — those
   are configured at runtime in the admin frontend („Einstellungen“) and stored

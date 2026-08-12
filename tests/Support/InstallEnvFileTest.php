@@ -229,6 +229,46 @@ final class InstallEnvFileTest extends TestCase
     }
 
     /**
+     * The SECOND reader. `MigrationRunner::readEnvFile()` supplies the DB
+     * credentials for the auth/customer migrations, and it is a separate
+     * hand-rolled parser from install.php's `read_env_kv()`. It was missed when
+     * env_line() started escaping, so a DB password containing `$`, `"` or `\`
+     * reached Phinx with a stray backslash: auth and customer died with
+     * `SQLSTATE[HY000] [1045] Access denied` on a real install while the
+     * frontend — whose installer path uses read_env_kv() — migrated fine, and
+     * while the services themselves connected fine with real phpdotenv.
+     *
+     * @dataProvider serviceConfigProvider
+     */
+    public function testMigrationRunnerEnvReaderAgreesWithPhpdotenv(string $service, array $config): void
+    {
+        $dir = \sys_get_temp_dir() . '/tds-install-mr-' . \bin2hex(\random_bytes(6));
+        \mkdir($dir);
+        try {
+            \file_put_contents($dir . '/.env', env_for($service, $config));
+
+            $read = new \ReflectionMethod(\Tds\ApiGateway\Support\MigrationRunner::class, 'readEnvFile');
+            $read->setAccessible(true);
+            $viaRunner = $read->invoke(null, $dir . '/.env');
+            $viaDotenv = Dotenv::createArrayBacked($dir)->load();
+
+            foreach ($viaDotenv as $key => $value) {
+                self::assertSame(
+                    (string) $value,
+                    $viaRunner[$key] ?? null,
+                    "MigrationRunner::readEnvFile() disagrees with phpdotenv on {$key}"
+                );
+            }
+            // The credentials Phinx actually authenticates with.
+            self::assertSame($config['db_pass'], $viaRunner['DB_PASS'] ?? null);
+            self::assertSame($config['db_user'], $viaRunner['DB_USER'] ?? null);
+        } finally {
+            @\unlink($dir . '/.env');
+            @\rmdir($dir);
+        }
+    }
+
+    /**
      * Escaping round-trip on values chosen to break naive quoting. `$` matters
      * beyond parsing: phpdotenv interpolates `${VAR}` inside double quotes, so
      * an unescaped `$` would be silently rewritten rather than merely fail.
