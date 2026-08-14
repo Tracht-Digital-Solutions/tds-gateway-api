@@ -43,6 +43,22 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    services:
+      # Production parity for the "Rehearse a fresh install" step below. The
+      # prod host is MySQL 8; dev and every repo's own CI run MariaDB, which
+      # accepts DDL that MySQL 8 rejects — so a migration can be green
+      # everywhere and still take down /install.php on a fresh host.
+      mysql8:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: dev
+        ports:
+          - 33306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pdev"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
     steps:
       - name: Checkout gateway
         uses: actions/checkout@v5
@@ -190,6 +206,26 @@ jobs:
         # file", which fails the assemble on EVERY push regardless of what the
         # services actually resolve.
         run: php _src/gateway/scripts/check-shared-deps.php _src/auth _src/customer _src/frontend
+
+      # The installer lives in THIS repo and configures services that live in
+      # other ones, so a service can gain an env var and ship without anyone
+      # touching install.php — and every fresh installation then comes up
+      # missing that setting, silently. This is the only place all three
+      # writers (install.php, docker-entrypoint.sh, each .env.example) exist
+      # side by side, so it is the only place the drift can be seen.
+      - name: Check installer matches the services' env contract
+        run: |
+          php _src/gateway/scripts/check-env-parity.php _src/gateway \
+            auth=_src/auth customer=_src/customer frontend=_src/frontend
+
+      # Rehearse /install.php's migration steps against a real MySQL 8 — which
+      # is what the production host runs, while dev and CI run the more
+      # permissive MariaDB. This is the check that would have caught the two
+      # nullable-PRIMARY-KEY migrations that killed a fresh install at
+      # "Migration: auth" with error 1171, halfway through, leaving every later
+      # migration unapplied.
+      - name: Rehearse a fresh install on MySQL 8
+        run: php _src/gateway/scripts/check-migrations-mysql8.php _src/auth _src/customer _src/frontend
 
       - name: Assemble bundle
         run: |

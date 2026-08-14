@@ -183,6 +183,26 @@ big picture.
   `frontend` composes its extensions via Composer `path` repos; the assemble
   step mirrors (copies) them into its `vendor/` (`COMPOSER_MIRROR_PATH_REPOS=1`)
   so the bundle ships no dangling symlinks.
+- **The assemble rehearses a fresh install on MySQL 8 (0.4.12) —
+  `scripts/check-migrations-mysql8.php`.** The production host is MySQL 8;
+  development, every service repo's own CI and all the DB-backed tests run
+  MariaDB, which is markedly more permissive. So a migration can be green in
+  every place anyone looks and still be impossible to apply where it matters.
+  Phinx defaults every `addColumn()` to nullable, and a nullable PRIMARY KEY
+  column is silently coerced by MariaDB but rejected by MySQL 8 with
+  `SQLSTATE[42000] 1171 All parts of a PRIMARY KEY must be NOT NULL`. Two
+  tds-auth-api migrations (`app_user_avatar`, `auth_company_policy`) shipped
+  that way, and the first and only symptom was `/install.php` dying on a fresh
+  host at *"Migration: auth"* with fourteen migrations applied, ten not, and no
+  way to continue. The step drives exactly what the installer drives, each into
+  its own empty database: auth + customer through their bundled Phinx (via a
+  generated config, so it does not depend on how each repo's `phinx.php` reads
+  its env), and frontend through tds-core-frontend-api's **own** in-process
+  `MigrationRunner` — which is the only way to reach the 13 composed
+  extensions, none of which has a PHP suite of its own. A `mysql:8` service
+  container backs it (host port 33306); the script refuses to pass if the
+  server it reaches is not MySQL 8, because a MariaDB there would make the
+  whole check succeed vacuously.
 - **Don't make the services depend on the gateway, or read env outside their
   `Bootstrap`.** The in-process env scope only brackets `createApp`; an action
   reading `getenv()` at request time would escape it.
@@ -325,6 +345,26 @@ That asymmetric failure is the tell for an unset/expired token.
 - Writes `services/<name>/.env` (+ gateway `.env`) for **auth, customer, frontend**
   from the same templates as the `.env.example`s / `deploy/docker-entrypoint.sh`;
   keep all three in sync when a service gains an env var.
+- **That sync is now enforced by `scripts/check-env-parity.php` (0.4.12), run
+  during the assemble.** The installer configures services that live in *other
+  repositories*, so a service can gain an env var, ship and deploy perfectly
+  while every new installation silently comes up without that setting — nothing
+  goes red, because nothing compares the two. It had already happened twice:
+  passkeys + "30 Tage angemeldet bleiben" added six auth env vars that
+  `install.php` never learned about (surviving only on `Bootstrap`'s defaults,
+  **one of which is the hard-coded production domain** — so passkeys were broken
+  on any non-live host, silently), and the frontend's `DOCUMENT_*` pair went the
+  other way, written by the installer and absent from the service's own
+  `.env.example`. The assemble is the only place all three writers exist side by
+  side, so it is the only place the drift can be seen. Rules: every
+  `.env.example` key must be written by `install.php` **or** listed in the
+  script's `DEFAULTED` table with the reason its default is safe; every key
+  `install.php` writes must be documented in the service's `.env.example`; the
+  entrypoint may be a subset but may not invent keys. Adding an env var to a
+  service therefore forces a conscious decision here — which is the point.
+  `install.php` now also writes `WEBAUTHN_RP_ID` (the cookie domain without its
+  leading dot — the RP ID is the *registrable domain*, so one passkey covers
+  `auth.`/`management.`/`app.`/`tools.`) and `WEBAUTHN_RP_NAME`.
 - **Every generated line goes through `env_line()`, which QUOTES and escapes the
   value — never string-interpolate a value into the `.env` body.** phpdotenv
   refuses a bare unquoted value containing a space, and each service's

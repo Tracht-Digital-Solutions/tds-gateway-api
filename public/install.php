@@ -172,6 +172,14 @@ function env_for(string $name, array $c): string
                 'JWT_REFRESH_TTL_SECONDS' => '2592000',
                 'COOKIE_DOMAIN' => $c['cookie_domain'],
                 'COOKIE_NAME' => 'tds_session',
+                // Passkeys. The RP ID is the REGISTRABLE DOMAIN, not the login
+                // host, so one passkey covers auth./management./app./tools. —
+                // which is exactly the cookie domain without its leading dot.
+                // Without this line the service falls back to the hard-coded
+                // `tracht-digital.de`, so passkey registration fails on every
+                // host that is not the live one, silently and with no log.
+                'WEBAUTHN_RP_ID' => ltrim((string) $c['cookie_domain'], '.'),
+                'WEBAUTHN_RP_NAME' => 'Tracht Digital Solutions',
                 'LOGIN_RATE_LIMIT' => '10',
                 'LOGIN_RATE_WINDOW_SECONDS' => '900',
                 // Bootstrap-Admin-Identität dokumentieren, damit ein späterer
