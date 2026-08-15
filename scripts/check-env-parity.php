@@ -97,7 +97,24 @@ const DEFAULTED = [
         'CUSTOMER_APP_URL' => 'Link building only; defaults to the production portal host.',
         'SERVICE_TOKEN' => 'Falls back to ADMIN_TOKEN, which the installer does write.',
     ],
-    'frontend' => [],
+    'frontend' => [
+        // The support-tickets mailbox is configured in the panel (runtime
+        // SettingsStore, namespace `support-tickets`, AES-256-GCM at rest). The
+        // env vars survive only as a fallback for a host that was set up
+        // through the file, so an installer that asked for them at setup time —
+        // before there is an inbox to point at — would be asking too early.
+        'TICKET_ADMIN_EMAIL' => 'Notification target, edited in the admin frontend.',
+        'TICKET_UPLOAD_DIR' => 'Optional attachment storage; unset leaves uploads answering 503.',
+        'INGEST_TOKEN' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang); only needed for an external scheduler.',
+        'IMAP_HOST' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'IMAP_PORT' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'IMAP_USER' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'IMAP_PASSWORD' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'IMAP_SECURITY' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'IMAP_FOLDER' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
+        'TICKET_INGEST_MODE' => 'Runtime SettingsStore; defaults to "reply" (thread replies only), which is the safe rule.',
+        'TICKET_INGEST_MATCH_COMPANY' => 'Runtime SettingsStore; defaults to on.',
+    ],
 ];
 
 $args = array_slice($argv, 1);

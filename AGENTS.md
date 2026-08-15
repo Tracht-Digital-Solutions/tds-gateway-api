@@ -365,6 +365,13 @@ That asymmetric failure is the tell for an unset/expired token.
   `install.php` now also writes `WEBAUTHN_RP_ID` (the cookie domain without its
   leading dot — the RP ID is the *registrable domain*, so one passkey covers
   `auth.`/`management.`/`app.`/`tools.`) and `WEBAUTHN_RP_NAME`.
+  **The `frontend` DEFAULTED block exists as of 0.4.13** — it was empty until the
+  support-tickets mailbox (`IMAP_*`, `INGEST_TOKEN`, `TICKET_INGEST_*`) became
+  panel-configurable and the frontend service documented those keys as a
+  fallback. They belong in `DEFAULTED`, not in `install.php`: the installer runs
+  before there is an inbox to point at, and the real configuration happens under
+  Einstellungen → Support-Tickets → E-Mail-Eingang, encrypted at rest. That is
+  the same call the `customer` block already makes for Stripe, Lexware and SMTP.
 - **Every generated line goes through `env_line()`, which QUOTES and escapes the
   value — never string-interpolate a value into the `.env` body.** phpdotenv
   refuses a bare unquoted value containing a space, and each service's
