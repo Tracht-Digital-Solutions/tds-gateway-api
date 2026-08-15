@@ -1,0 +1,26 @@
+{
+  "built_at": "2026-08-15T15:08:32Z",
+  "trigger": "push",
+  "sources": {
+    "gateway":  "a219bfe438a16077dccb8cc3de2401d7e3bf5fdc",
+    "auth":     "79f027153906ad173eb0d677b9e29742d68bba7b",
+    "customer": "18db0c69247184e3a8d0c10f59f55d2de8ca3233",
+    "frontend": "68787206770bf4907dd0255f911f6d10e6ab46e8"
+  },
+  "frontend_extensions": {
+    "contract":     "0ba5cb6093a578065475f86747d503b06a651c93",
+    "time-tracker": "753eb0c2a0fc98c237b5738729774f9f0791dcbc",
+    "customers":    "67bc9b23c3c890933b3ca4125771b0c3af28a6a3",
+    "billing":      "7b01679ff4be8e1cfee686afc92f068d8be770af",
+    "lexware":      "4daf8e09974b731a94721e0352fda0628d360be7",
+    "tools":        "cc70c26e3f0da74aa1b88b76effad391145f7bc8",
+    "messages":     "6c70c39e83f9faa1c15dfa19e68d54ae4947f041",
+    "projects":     "df5defd4010eda82905ff9397e35d8dfe80445af",
+    "documents":    "bbfcaeb9aca18140f35dc956c85dfbb5a4e0431d",
+    "support-tickets": "5edac97300c1b6158bd3693cbb2e04199dc57179",
+    "contact-tickets": "82d7cb411ae80d2d88219ccfff136f96e2b5f393",
+    "live-chat-cta": "afeaf2184380e55ad37ce2223b70b1555384cc6e",
+    "website-cms":  "451e2bbba675c2ec90de863203b1ee06281f023a",
+    "blog-cms":     "45c86103b786971b9ca8ec86489e113a4c03ff16"
+  }
+}

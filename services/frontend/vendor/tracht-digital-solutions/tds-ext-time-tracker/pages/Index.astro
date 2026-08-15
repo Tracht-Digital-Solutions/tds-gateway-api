@@ -1,0 +1,12 @@
+---
+// The /time page, injected into the host build via the contract's route slot.
+// Hosts the full TimeTracker island (start/stop timer, manual entries, list).
+import TimeTracker from "../islands/TimeTracker.tsx";
+---
+
+<section class="tds-page">
+  <div class="tds-page__head">
+    <h1 class="tds-page__title">Zeiterfassung</h1>
+  </div>
+  <TimeTracker client:load />
+</section>
