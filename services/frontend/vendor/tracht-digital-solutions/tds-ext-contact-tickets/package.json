@@ -1,0 +1,65 @@
+{
+  "name": "@tracht-digital-solutions/tds-ext-contact-tickets",
+  "version": "0.2.13",
+  "description": "Contact-tickets extension for the TDS panel platform: public contact-form inbox (contact_message) via frontend-contract.",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "files": [
+    "dist",
+    "pages",
+    "widgets",
+    "islands",
+    "php",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./pages/*": "./pages/*",
+    "./widgets/*": "./widgets/*",
+    "./islands/*": "./islands/*"
+  },
+  "scripts": {
+    "build": "tsup",
+    "type-check": "tsc --noEmit",
+    "lint:primitives": "node scripts/lint-primitives.mjs",
+    "clean": "rimraf dist",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@tracht-digital-solutions/tds-frontend-contract": "^1.0.0"
+  },
+  "peerDependencies": {
+    "@tracht-digital-solutions/tds-shared": ">=0.19.0",
+    "astro": ">=6",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.0.0",
+    "jsdom": "^25.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "rimraf": "^6.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.9"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tracht-Digital-Solutions/tds-ext-contact-tickets-pkg.git"
+  }
+}
