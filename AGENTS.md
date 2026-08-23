@@ -389,6 +389,13 @@ That asymmetric failure is the tell for an unset/expired token.
   before there is an inbox to point at, and the real configuration happens under
   Einstellungen → Support-Tickets → E-Mail-Eingang, encrypted at rest. That is
   the same call the `customer` block already makes for Stripe, Lexware and SMTP.
+  **`SITE_KEY_ENFORCEMENT` joined it in 0.5.1** for a sharper version of the same
+  reason: the site keys themselves live in `app_site_key` as hashes and are
+  issued in the panel, so there is deliberately no env var holding one — only the
+  *policy* has a fallback. Asking for it at install time would mean asking
+  somebody to choose an enforcement level before a single site has a key, i.e.
+  to choose wrong; its default (`off`) is the behaviour of every installation
+  predating the feature.
 - **Every generated line goes through `env_line()`, which QUOTES and escapes the
   value — never string-interpolate a value into the `.env` body.** phpdotenv
   refuses a bare unquoted value containing a space, and each service's

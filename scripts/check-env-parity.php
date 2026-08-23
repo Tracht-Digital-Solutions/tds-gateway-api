@@ -114,6 +114,13 @@ const DEFAULTED = [
         'IMAP_FOLDER' => 'Runtime SettingsStore (Einstellungen → Support-Tickets → E-Mail-Eingang).',
         'TICKET_INGEST_MODE' => 'Runtime SettingsStore; defaults to "reply" (thread replies only), which is the safe rule.',
         'TICKET_INGEST_MATCH_COMPANY' => 'Runtime SettingsStore; defaults to on.',
+        // Site keys. The keys themselves live in app_site_key as hashes and are
+        // issued in the panel, so there is deliberately no env var holding one.
+        // Only the POLICY has a fallback, and its default is the pre-feature
+        // behaviour — asking at install time would mean asking somebody to
+        // choose an enforcement level before a single site has a key, i.e. to
+        // choose wrong.
+        'SITE_KEY_ENFORCEMENT' => 'Runtime SettingsStore (Einstellungen → Site-Verbindungen); defaults to "off", which is the behaviour of every installation predating site keys.',
     ],
 ];
 

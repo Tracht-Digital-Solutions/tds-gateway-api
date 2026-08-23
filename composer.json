@@ -3,7 +3,7 @@
   "description": "Single-entry API gateway that routes api.tracht-digital.de/* to the current TDS backends: auth, customer, and the composed frontend API (tds-core-frontend-api, default catch-all)",
   "type": "project",
   "license": "proprietary",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "require": {
     "php": ">=8.1",
     "ext-curl": "*",
