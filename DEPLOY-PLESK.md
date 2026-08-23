@@ -54,6 +54,13 @@ Für jede der vier Frontend-(Sub)Domains identisch:
    „automatisch", Zielpfad = Docroot der (Sub)Domain.
 2. *Hosting-Einstellungen*: **PHP deaktivieren** (rein statische Auslieferung),
    bevorzugt „nginx direkt ausliefern" für statische Dateien.
+
+   > **Das gilt auch für `/install`.** Der Setup-Assistent der vier Frontends
+   > lief bis 2026-08 als PHP-Datei und wurde hier deshalb als Klartext
+   > ausgeliefert oder mit 403 abgewiesen — er konnte auf keiner der Sites je
+   > funktionieren, und nichts hat es gemeldet. Seit tds-shared 0.27.0 ist er
+   > eine gewöhnliche Seite der Site und läuft im Browser. **PHP bleibt hier
+   > aus**; nur `api.` ist ein PHP-Bundle.
 3. **Deploy-Webhook verdrahten**: Die Git-Extension zeigt eine
    *Webhook-URL* („Repository aktualisieren") an. Diese URL als Secret
    `DEPLOY_WEBHOOK_URL` im **jeweiligen Frontend-Repo** auf GitHub hinterlegen.
