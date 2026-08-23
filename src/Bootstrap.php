@@ -14,6 +14,7 @@ use Tds\ApiGateway\Action\InProcessHealthAction;
 use Tds\ApiGateway\Action\ProxyAction;
 use Tds\ApiGateway\Config\ServiceRegistry;
 use Tds\ApiGateway\Dispatch\InProcessDispatcher;
+use Tds\ApiGateway\Http\CorsMiddleware;
 use Tds\ApiGateway\Http\CurlProxyClient;
 use Tds\ApiGateway\Http\RobotsTagMiddleware;
 use Tds\ApiGateway\Support\Logger;
@@ -150,8 +151,19 @@ final class Bootstrap
         // prefix-routing mode sets the same header via deploy/nginx.conf.example.
         $app->add(new RobotsTagMiddleware());
 
-        $app->get('/', IndexAction::class);
-        $app->get('/healthz', $healthAction);
+        // The gateway's own two routes, and the ONLY two that carry CORS here.
+        // They have no upstream to own a policy, so nothing set a header and a
+        // cross-origin read of /healthz was blocked — which is what made the
+        // sites' setup wizard report "nicht erreichbar" for a healthy gateway
+        // while the content routes beside it answered fine. Attached per route
+        // (never `$app->add`): the catch-all's upstreams set their own header,
+        // and a second one does not duplicate, it breaks the response.
+        // OPTIONS is mapped so routing resolves a preflight here instead of
+        // handing it to the catch-all; CorsMiddleware short-circuits it, so
+        // neither action ever sees it.
+        $cors = CorsMiddleware::fromEnv($env);
+        $app->map(['GET', 'OPTIONS'], '/', IndexAction::class)->add($cors);
+        $app->map(['GET', 'OPTIONS'], '/healthz', $healthAction)->add($cors);
         // Everything else goes to the active backend (in-process dispatch or
         // HTTP proxy). FastRoute prefers the static routes above over this
         // variable catch-all.

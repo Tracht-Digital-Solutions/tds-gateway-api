@@ -19,8 +19,11 @@ loopback `php -S` services instead.
   `tds-auth-api` (`/auth/*`), `customer` → `tds-customer-api` (`/customer/*`), and
   `frontend` → `tds-core-frontend-api` as the **default catch-all** (everything else) —
   the composed base + extensions that replaced the archived `content`/`contact` backends.
-- **CORS is owned by each upstream**, never added at the gateway (it would duplicate the
-  header). The internal API wiki lives in the frontend API (`/wiki.json`), not the gateway.
+- **CORS is owned by each upstream** and must never be added to the catch-all (a second
+  `Access-Control-Allow-Origin` makes the browser reject the response outright). The
+  gateway's OWN two routes — `/` and `/healthz` — are the exception: they have no
+  upstream, so since 0.5.0 they carry CORS via per-route middleware. The internal API
+  wiki lives in the frontend API (`/wiki.json`), not the gateway.
 - **The `env()` `?? false` precedence rule and the "CORS after `addRoutingMiddleware()`"
   LIFO rule apply here too** — see the root `CLAUDE.md` "Cross-cutting conventions".
 

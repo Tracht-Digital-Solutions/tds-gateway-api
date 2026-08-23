@@ -508,8 +508,18 @@ function run_task(string $id, array $c, string $gatewayDir, string $servicesDir,
             // The gateway is a pure router — no secrets. GATEWAY_SERVICES +
             // GATEWAY_DEFAULT_SERVICE have baked defaults (auth,customer,frontend
             // / frontend), so a minimal .env is enough.
+            //
+            // CORS_ALLOWED_ORIGINS is the one exception, and it applies to the
+            // gateway's own `/` + `/healthz` only (never the catch-all, where a
+            // second header breaks the response). The first-party surfaces are
+            // baked into CorsMiddleware::BASELINE, so this line only carries
+            // whatever extra origins the operator typed — the same value the
+            // three services get.
             $ok = @file_put_contents($gatewayDir . '/.env',
-                env_body(['APP_ENV' => 'production'])) !== false;
+                env_body([
+                    'APP_ENV' => 'production',
+                    'CORS_ALLOWED_ORIGINS' => $c['cors'],
+                ])) !== false;
             return [$ok, $ok ? 'gateway/.env geschrieben.' : 'Konnte gateway/.env nicht schreiben.'];
 
         case 'env_auth':

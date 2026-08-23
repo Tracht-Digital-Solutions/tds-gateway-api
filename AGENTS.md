@@ -127,10 +127,27 @@ big picture.
   prefixed backend means adding it to `ServiceRegistry::DEFAULTS` +
   `Bootstrap::SERVICE_BOOTSTRAPS`; new frontend features need no gateway change
   (they're just more root routes on the catch-all).
-- **Don't add CORS here.** Each upstream emits its own CORS headers and the
-  proxy forwards them; injecting gateway CORS would duplicate
-  `Access-Control-Allow-Origin`. OPTIONS preflights are forwarded so the
-  upstream's CorsMiddleware answers them.
+- **Don't add CORS to the CATCH-ALL — but the gateway's own two routes need
+  it.** Each upstream emits its own CORS headers and the proxy forwards them;
+  injecting gateway CORS there would send `Access-Control-Allow-Origin` twice,
+  which a browser does not merely tolerate as a duplicate — it rejects the
+  response outright, so the whole API surface would go dark. OPTIONS preflights
+  on proxied paths are forwarded so the upstream's CorsMiddleware answers them.
+  That rule used to be stated as "no CORS here" full stop, and it missed the
+  case where it is wrong: **`/` and `/healthz` have no upstream.** They are
+  answered by the gateway itself, so nothing set a header and every
+  cross-origin read of them was blocked. The visible cost was the four sites'
+  `/install` wizard, whose first and most prominent check is `/healthz`: it
+  reported "nicht erreichbar" for a completely healthy gateway, immediately
+  above a green `/content/blog` — which travels to the frontend service and
+  does get a header. An operator reading that concludes the API is broken.
+  `Http\CorsMiddleware` (0.5.0) is attached **per route** with `->add()`, never
+  `$app->add()`, and `tests/Http/GatewayCorsTest.php` asserts both halves: the
+  own routes carry the header, the catch-all carries none. Origins are the
+  first-party baseline plus `CORS_ALLOWED_ORIGINS`, union only — a stale `.env`
+  must not be able to lock the wizard out of the health check it exists to run.
+  Note `/healthz` answers **503** when a service is down and still needs the
+  header then; that is exactly when the check is being read.
 - **Don't statically serve upload routes.** Any file-serving route (blog/CMS
   cover/body images, customer/document files) is user content — the owning API
   stamps the anti-XSS headers (nosniff, sandbox CSP, and `Content-Disposition:
@@ -448,8 +465,13 @@ That asymmetric failure is the tell for an unset/expired token.
   (JS `donePanel` + no-JS step 5) print the login and the admin-frontend URL
   (`management.tracht-digital.de`).
 - **CORS default** lists `management.tracht-digital.de` (the admin frontend's current
-  address) alongside `app.`/blog/landing — keep it in sync with the backends'
-  `CORS_ALLOWED_ORIGINS` (the gateway itself emits no CORS).
+  address) alongside `app.`/blog/landing. The installer writes it to all three
+  services **and, since 0.5.0, to the gateway's own `.env`** — the gateway emits
+  CORS for `/` and `/healthz` now (see the header-ownership bullet above). On a
+  running host the list is better edited in the admin frontend under
+  Einstellungen → *CORS / Freigegebene Origins*, which the frontend service
+  unions on top of this file; the installer value is the starting point, not the
+  permanent one.
 - **Security:** refuses to run once a `.tds-installed` lock (bundle root) or
   `services/auth/.env` exists (wizard entry guard), and offers self-delete. It
   ships in every bundle and is an open setup endpoint **before** first install —

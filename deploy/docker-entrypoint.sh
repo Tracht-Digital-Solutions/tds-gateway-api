@@ -34,6 +34,12 @@ DB_PASS=${DB_PASS:-tds}
 ADMIN_TOKEN=${ADMIN_TOKEN:-dev-admin-token-change-me}
 AUTH_API_URL=${AUTH_API_URL:-http://127.0.0.1:8000/auth}
 CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4321}
+# Exported, not just defaulted: besides landing in each service's .env below,
+# the GATEWAY process reads it for its own two routes (`/` and `/healthz`) —
+# and the gateway is configured from the container environment, not from a
+# written .env file. Without the export, a dev origin reaches the services but
+# not the health check the /install wizard runs first.
+export CORS_ALLOWED_ORIGINS
 
 write_env_if_absent() {
   # $1 = service name, remaining stdin = file body
