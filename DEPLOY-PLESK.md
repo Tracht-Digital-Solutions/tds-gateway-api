@@ -479,5 +479,25 @@ Bundle gebaut wurde.
   Fehler, zeigt der Docroot noch auf den Anwendungs-Root — und dann liegen
   `server/entry.mjs`, `package.json` und `node_modules/` zusätzlich offen im
   Web.
+- **Eine öffentliche Site antwortet auf allem mit 500, im Error-Log steht
+  `Option FollowSymLinks not allowed here`** → Plesk gibt seinen vhosts ein
+  eingeschränktes `AllowOverride Options=…` ohne `FollowSymLinks`, und eine
+  nicht erlaubte Option ist ein **Abbruch, kein ignoriertes Wort**: Apache
+  verweigert die ganze `.htaccess` und damit jede Anfrage. Behoben in
+  landingpage 0.21.1 / blog 0.28.1 / tools 0.19.1 — die drei `.htaccess` setzen
+  nur noch `Options -Indexes`, genau wie das seit jeher funktionierende
+  `gateway/public/.htaccess`. **Sofort-Abhilfe ohne Release:** auf dem Host in
+  `client/.htaccess` das `+FollowSymLinks` von der `Options`-Zeile streichen
+  (der nächste Deploy überschreibt die Datei ohnehin mit der korrigierten
+  Fassung). Braucht eine Site das Recht doch — der Seiten-Cache wird über den
+  Symlink `client/_tds-cache` ausgeliefert —, gehört es auf **vhost**-Ebene
+  unter *Additional Apache directives*, die `AllowOverride` nicht einschränkt:
+
+  ```apache
+  <Directory /var/www/vhosts/<host>/<domain>/httpdocs/client>
+    Options +FollowSymLinks
+  </Directory>
+  ```
+
 - **Login funktioniert auf `admin.`, aber nicht auf `app.`** → Cookie-Domain:
   beide Subdomains müssen über HTTPS unter `.tracht-digital.de` laufen.
