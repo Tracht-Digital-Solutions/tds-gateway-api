@@ -17,11 +17,18 @@ einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 
 | (Sub)Domain | Repo | Branch | Art |
 |---|---|---|---|
-| `tracht-digital.de` | `tds-landingpage-frontend` | `release` | statisch (HTML/CSS/JS) |
-| `blog.tracht-digital.de` | `tds-blog-frontend` | `release` | statisch |
-| `management.tracht-digital.de` | `tds-admin-frontend` | `release` | statisch |
+| `tracht-digital.de` | `tds-landingpage-frontend` | `release` | **Node-App** (Astro SSR + Seiten-Cache) |
+| `blog.tracht-digital.de` | `tds-blog-frontend` | `release` | **Node-App** |
+| `tools.tracht-digital.de` | `tds-tools-frontend` | `release` | **Node-App** |
+| `management.tracht-digital.de` | `tds-admin-frontend` | `release` | statisch (HTML/CSS/JS) |
 | `app.tracht-digital.de` | `tds-customer-frontend` | `release` | statisch |
 | `api.tracht-digital.de` | `tds-gateway-api` | `release` | PHP-Bundle: Gateway + `services/{auth,customer,frontend}` |
+
+> **Die drei öffentlichen Sites waren bis zum 24.08.2026 statisch.** Sie rendern
+> jetzt auf Anfrage und legen jede Seite als Datei ab, die Apache direkt
+> ausliefert — gleich schnell wie vorher, aber ohne dass eine
+> Inhaltsänderung einen Deploy braucht. Kapitel 3.2 beschreibt die Einrichtung,
+> `tds-core-frontend-api/SITES.md` den Betrieb.
 
 ---
 
@@ -46,31 +53,148 @@ einbinden (`git@github.com:Tracht-Digital-Solutions/<repo>.git`); den von Plesk
 angezeigten öffentlichen Schlüssel im jeweiligen GitHub-Repo unter
 *Settings → Deploy keys* (read-only) hinterlegen.
 
-## 3. Die vier statischen Frontends
+## 3. Die Frontends
 
-Für jede der vier Frontend-(Sub)Domains identisch:
+**Seit dem 24.08.2026 gibt es hier zwei verschiedene Arten von Site**, und die
+Unterscheidung ist die wichtigste dieses Kapitels:
+
+| Domain | Repo | Art |
+|---|---|---|
+| `management.tracht-digital.de` | `tds-admin-frontend` | **statisch**, PHP aus |
+| `app.tracht-digital.de` | `tds-customer-frontend` | **statisch**, PHP aus |
+| `tracht-digital.de` | `tds-landingpage-frontend` | **Node-App** (Astro SSR + Seiten-Cache) |
+| `blog.tracht-digital.de` | `tds-blog-frontend` | **Node-App** |
+| `tools.tracht-digital.de` | `tds-tools-frontend` | **Node-App** |
+
+**PHP bleibt auf allen fünf aus.** Nur `api.` ist ein PHP-Bundle.
+
+### 3.1 Die beiden statischen Panels
 
 1. *Git → Repository hinzufügen*: Repo-URL, **Branch `release`**, Deploy-Modus
-   „automatisch", Zielpfad = Docroot der (Sub)Domain.
+   „automatisch", Zielpfad = Docroot der Subdomain.
 2. *Hosting-Einstellungen*: **PHP deaktivieren** (rein statische Auslieferung),
    bevorzugt „nginx direkt ausliefern" für statische Dateien.
-
-   > **Das gilt auch für `/install`.** Der Setup-Assistent der vier Frontends
-   > lief bis 2026-08 als PHP-Datei und wurde hier deshalb als Klartext
-   > ausgeliefert oder mit 403 abgewiesen — er konnte auf keiner der Sites je
-   > funktionieren, und nichts hat es gemeldet. Seit tds-shared 0.27.0 ist er
-   > eine gewöhnliche Seite der Site und läuft im Browser. **PHP bleibt hier
-   > aus**; nur `api.` ist ein PHP-Bundle.
-3. **Deploy-Webhook verdrahten**: Die Git-Extension zeigt eine
-   *Webhook-URL* („Repository aktualisieren") an. Diese URL als Secret
-   `DEPLOY_WEBHOOK_URL` im **jeweiligen Frontend-Repo** auf GitHub hinterlegen.
-   Die CI pingt sie **per POST** nach jedem **Release** (nicht auf `dev`) — Plesks
-   Git-Webhook beantwortet **nur POST**, ein bloßes GET liefert **404**. Plesk
-   pullt dann und die Seite ist live. (Der Token steckt in der URL selbst;
-   nirgendwo sonst ablegen.)
+3. **Deploy-Webhook verdrahten** (siehe 3.3).
 4. `management.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
    zusätzlich abdichten will, legt in Plesk eine IP-Beschränkung oder BasicAuth
    davor (optional).
+
+### 3.2 Die drei öffentlichen Sites (Node)
+
+Diese drei rendern auf Anfrage und legen jede gerenderte Seite als Datei ab, die
+Apache direkt ausliefert. Ein Treffer ist damit genauso schnell wie der frühere
+statische Build — und eine Inhaltsänderung kostet keinen Deploy mehr, sondern
+einen Cache-Neubau aus dem Panel (Details: `tds-core-frontend-api/SITES.md`).
+
+Der `release`-Branch trägt deshalb **keinen Ordner statischer Dateien mehr**,
+sondern einen lauffähigen Anwendungsbaum:
+
+```
+app.cjs          ← Startdatei für Passenger (CommonJS!)
+package.json     ← minimal, nur öffentliche Registry-Pakete
+server/          ← der SSR-Server. NICHT über das Web erreichbar
+client/          ← DocumentRoot: .htaccess, _astro/, prerenderte Seiten
+node_modules/    ← vorgebaut in der CI, ohne Erstanbieter-Pakete
+tmp/             ← damit `touch tmp/restart.txt` funktioniert
+```
+
+Je Domain:
+
+1. *Git → Repository hinzufügen*: Repo-URL, **Branch `release`**, Zielpfad z. B.
+   `blog.tracht-digital.de`.
+2. *Node.js* aktivieren und einstellen:
+
+   | Feld | Wert |
+   |---|---|
+   | Node.js-Version | 22.x |
+   | Application Root | der Zielpfad aus Schritt 1 |
+   | **Document Root** | derselbe Pfad **+ `/client`** |
+   | Application Startup File | `app.cjs` |
+   | Application Mode | `production` |
+
+   > **Document Root ≠ Application Root, und das ist nicht Kosmetik.** Zeigt der
+   > DocumentRoot auf den Anwendungs-Root, sind `server/entry.mjs`,
+   > `package.json` und `node_modules/` aus dem Web abrufbar, und ihre
+   > Vertraulichkeit hängt an `.htaccess`-Regeln. Mit dem Unterordner liegen sie
+   > schlicht außerhalb.
+
+   > **Die Startdatei muss `app.cjs` heißen — nicht `.js`.** Passenger lädt die
+   > Anwendung mit `require()`, und alle drei Pakete sind `"type": "module"`.
+   > Eine `.js`-Startdatei ist damit ESM, `require` scheitert mit
+   > `ERR_REQUIRE_ESM`, und Passenger zeigt seine allgemeine Fehlerseite — die
+   > eigentliche Ursache steht nur im App-Log.
+
+   > **Auf `PORT` oder `HOST` muss nichts eingestellt werden.** Passenger
+   > überschreibt `listen()` und bindet einen eigenen Unix-Socket; ein Port in
+   > der Umgebung wäre Dekoration.
+
+3. *Custom environment variables* setzen:
+
+   | Variable | Wert |
+   |---|---|
+   | `TDS_SITE_KEY` | der im Panel ausgestellte Site-Key |
+   | `TDS_CACHE_TOKEN` | frei gewählt, identisch zum Panel-Eintrag |
+   | `TDS_CACHE_DIR` | `/var/www/vhosts/<domain>/tds-cache/pages` |
+   | `TDS_CACHE_META_DIR` | `/var/www/vhosts/<domain>/tds-cache/meta` |
+
+   > **Der Cache-Speicher liegt AUSSERHALB des Git-Checkouts**, weil ein Deploy
+   > alles entfernen darf, was er nicht kennt. Die Anwendung legt beim Start
+   > einen Symlink `client/_tds-cache` darauf an und erneuert ihn bei jedem
+   > Start; ein Deploy kann also höchstens den Link zerstören, nie den Inhalt.
+   > Die Metadaten liegen bewusst in einem zweiten Verzeichnis, das gar nicht
+   > verlinkt ist: das Seitenverzeichnis ist per Konstruktion aus dem Web
+   > erreichbar.
+
+4. **Bereitstellungsaktion** in der Git-Extension eintragen — ohne sie läuft nach
+   einem Deploy weiter der alte Code, weil Passenger den Prozess offen hält:
+
+   ```sh
+   mkdir -p tmp && touch tmp/restart.txt
+   ```
+
+5. Empfohlen unter *Apache & nginx Settings → Additional Apache directives*:
+
+   ```apache
+   PassengerMinInstances 1
+   ```
+
+   Passenger beendet unbeschäftigte Prozesse nach fünf Minuten. Mit einem gut
+   gefüllten Cache ist die Anwendung fast immer unbeschäftigt — jeder Fehltreffer
+   bezahlte dann einen kompletten Kaltstart.
+
+6. Deploy-Webhook wie in 3.3.
+
+7. Nachweisen, dass der Cache wirklich greift:
+
+   ```sh
+   curl -sI https://blog.tracht-digital.de/ | grep -i x-tds-cache   # MISS
+   curl -sI https://blog.tracht-digital.de/ | grep -i x-tds-cache   # HIT
+   ```
+
+   Steht dort nie `HIT`, funktioniert die Site trotzdem — sie rendert nur jedes
+   Mal neu. Übliche Ursachen: der Rewrite in `client/.htaccess` greift nicht
+   (`AllowOverride`), oder das Cache-Verzeichnis ist nicht beschreibbar.
+
+### 3.3 Deploy-Webhook (alle fünf)
+
+Die Git-Extension zeigt eine *Webhook-URL* („Repository aktualisieren") an. Diese
+URL als Secret `DEPLOY_WEBHOOK_URL` im **jeweiligen Frontend-Repo** auf GitHub
+hinterlegen. Die CI pingt sie **per POST** nach jedem **Release** (nicht auf
+`dev`) — Plesks Git-Webhook beantwortet **nur POST**, ein bloßes GET liefert
+**404**.
+
+> **`tools.tracht-digital.de` deployt seit dem 24.08.2026 nicht mehr bei jedem
+> Push auf `main`.** Solange der `release`-Branch ein Ordner statischer Dateien
+> war, konnte ein versehentlicher Push höchstens falschen Inhalt
+> veröffentlichen. Jetzt ist es eine Anwendung, die einen entsprechend
+> eingerichteten Host braucht — auf einen statisch konfigurierten geschoben,
+> legt sie die Site auf allen Pfaden lahm. Der Deploy ist deshalb der manuelle
+> Knopf.
+
+> **`/install` ist eine gewöhnliche Seite der Site.** Der Assistent lief bis
+> 2026-08 als PHP-Datei und wurde hier als Klartext ausgeliefert oder mit 403
+> abgewiesen — er konnte auf keiner Site je funktionieren, und nichts hat es
+> gemeldet. Seit tds-shared 0.27.0 läuft er im Browser.
 
 ## 4. `api.tracht-digital.de` — das API-Bundle als ein Projekt
 
