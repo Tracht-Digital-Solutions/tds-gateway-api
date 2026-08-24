@@ -419,7 +419,11 @@ Bundle gebaut wurde.
    erzwungenen Passwortwechsel abschließen — dann `gateway/public/install.php`
    löschen.
 5. ☐ Frontends: Git-Checkout (`release`) je Subdomain, PHP aus,
-   Webhook-Secrets in den vier Frontend-Repos setzen.
+   Webhook-Secrets in den fünf Frontend-Repos setzen. **Die beiden Panels sind
+   damit fertig, die drei öffentlichen Sites nicht** — für die zusätzlich 3.2
+   abarbeiten: Node.js aktivieren, Document Root auf `<Zielpfad>/client`,
+   Startdatei `app.cjs`, Umgebungsvariablen, Bereitstellungsaktion. Ohne diesen
+   Schritt antwortet die Domain auf **jedem** Pfad mit einem Apache-Fehler.
 6. ☐ **`tds-blog-frontend` neu releasen** (Workflow „Release" manuell dispatchen), sobald die
    API live ist — die statischen Blog-Seiten backen ihre Artikel zur Build-Zeit
    und sind bis dahin leer (siehe Issue #1).
@@ -461,5 +465,19 @@ Bundle gebaut wurde.
   (`:8443`) stimmen, ist meist der Token/Pfad veraltet — die aktuelle Webhook-URL
   aus Plesk neu kopieren. (Die CI ruft den Hook korrekt **per POST** auf; ein GET
   liefert bei Plesk grundsätzlich 404.)
+- **Eine öffentliche Site antwortet mit `AH01276: Cannot serve directory …:
+  No matching DirectoryIndex … found`** → die Domain ist noch als *statische*
+  Site konfiguriert, der `release`-Branch ist aber seit dem 24.08.2026 eine
+  Node-Anwendung. Apache sieht im Docroot `app.cjs`, `server/` und `client/` —
+  und keine `index.html`, weil die Startseite gerendert wird statt zu
+  existieren. **Der Deploy ist in Ordnung; die Domain fehlt in 3.2.** Zwei
+  Einstellungen, in dieser Reihenfolge: *Node.js* für die Domain **aktivieren**
+  (ohne Passenger fällt keine Anfrage an Node durch, und `client/.htaccess`
+  liest Apache gar nicht, weil es im falschen Verzeichnis steht), und den
+  **Document Root auf `<Zielpfad>/client`** setzen, nicht auf den
+  Anwendungs-Root. Danach `touch tmp/restart.txt`. Bleibt es beim selben
+  Fehler, zeigt der Docroot noch auf den Anwendungs-Root — und dann liegen
+  `server/entry.mjs`, `package.json` und `node_modules/` zusätzlich offen im
+  Web.
 - **Login funktioniert auf `admin.`, aber nicht auf `app.`** → Cookie-Domain:
   beide Subdomains müssen über HTTPS unter `.tracht-digital.de` laufen.
