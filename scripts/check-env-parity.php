@@ -121,6 +121,12 @@ const DEFAULTED = [
         // choose an enforcement level before a single site has a key, i.e. to
         // choose wrong.
         'SITE_KEY_ENFORCEMENT' => 'Runtime SettingsStore (Einstellungen → Site-Verbindungen); defaults to "off", which is the behaviour of every installation predating site keys.',
+        // The CMS panels store page-cache tokens encrypted in their own
+        // SettingsStore namespaces. These env keys exist only so an already
+        // file-configured host keeps working; a fresh installer must not ask
+        // for runtime content credentials.
+        'BLOG_CACHE_TOKEN' => 'Runtime SettingsStore (Einstellungen → Blog → Cache-Token); optional env fallback for existing hosts.',
+        'WEBSITE_CACHE_TOKEN' => 'Runtime SettingsStore (Einstellungen → Website → Cache-Token); optional env fallback for existing hosts.',
     ],
 ];
 

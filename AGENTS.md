@@ -396,6 +396,11 @@ That asymmetric failure is the tell for an unset/expired token.
   somebody to choose an enforcement level before a single site has a key, i.e.
   to choose wrong; its default (`off`) is the behaviour of every installation
   predating the feature.
+  **`BLOG_CACHE_TOKEN` and `WEBSITE_CACHE_TOKEN` are the same runtime-first
+  class.** The CMS settings screens store them encrypted under their extension
+  namespaces; the frontend service documents the env names only as fallbacks
+  for already file-configured hosts. They belong in `frontend`'s `DEFAULTED`
+  list, never in the first-run installer.
 - **Every generated line goes through `env_line()`, which QUOTES and escapes the
   value — never string-interpolate a value into the `.env` body.** phpdotenv
   refuses a bare unquoted value containing a space, and each service's

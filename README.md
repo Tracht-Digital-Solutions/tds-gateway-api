@@ -54,7 +54,9 @@ then writes every `services/<name>/.env` (+ the gateway `.env`), generates the
 auth RS256 keypair, creates the storage dir and runs the migrations (auth +
 customer via phinx; frontend via its own in-process migrator over its composed
 extensions). Third-party keys (Stripe, DeepL, Lexware, GitHub rebuild) are set
-later at runtime in the admin frontend, not here.
+later at runtime in the admin frontend, not here. The blog/website page-cache
+tokens follow the same rule: the service `.env` names are optional fallbacks,
+while a fresh install configures the encrypted values in the CMS settings UI.
 
 **Security:** it refuses to run once configured (a `.tds-installed` lock or
 an existing `services/auth/.env`), and the final screen offers to delete
