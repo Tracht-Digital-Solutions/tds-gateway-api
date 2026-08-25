@@ -2,7 +2,7 @@
 
 Diese Anleitung beschreibt das komplette Produktions-Release der TDS-Plattform auf
 einem Plesk-Host (Obsidian, mit Git-Extension, PHP 8.3 FPM, MariaDB, Let's Encrypt).
-Sie deckt die Web-Properties ab: die statischen Frontends und das API-Bundle, das
+Sie deckt die Web-Properties ab: die fuenf Node-Frontends und das API-Bundle, das
 Gateway + die drei PHP-Backends (`auth`, `customer`, `frontend`) als **ein
 Plesk-Projekt** (eine Subdomain, ein Git-Checkout) deployt. `frontend` ist
 `tds-core-frontend-api` — die komponierte Basis + Extensions, die die archivierten
@@ -20,11 +20,12 @@ einmal den Release-Workflow ausführen, damit der `release`-Branch existiert.
 | `tracht-digital.de` | `tds-landingpage-frontend` | `release` | **Node-App** (Astro SSR + Seiten-Cache) |
 | `blog.tracht-digital.de` | `tds-blog-frontend` | `release` | **Node-App** |
 | `tools.tracht-digital.de` | `tds-tools-frontend` | `release` | **Node-App** |
-| `management.tracht-digital.de` | `tds-admin-frontend` | `release` | statisch (HTML/CSS/JS) |
-| `app.tracht-digital.de` | `tds-customer-frontend` | `release` | statisch |
+| `management.tracht-digital.de` | `tds-admin-frontend` | `release` | **Node-App** (Astro SSR, ohne Cache) |
+| `app.tracht-digital.de` | `tds-customer-frontend` | `release` | **Node-App** (Astro SSR, ohne Cache) |
 | `api.tracht-digital.de` | `tds-gateway-api` | `release` | PHP-Bundle: Gateway + `services/{auth,customer,frontend}` |
 
-> **Die drei öffentlichen Sites waren bis zum 24.08.2026 statisch.** Sie rendern
+> **Alle fuenf Frontends waren einmal statisch** — die drei oeffentlichen bis zum
+> 24.08.2026, die beiden Panels bis zum 25.08.2026. Die oeffentlichen rendern
 > jetzt auf Anfrage und legen jede Seite als Datei ab, die Apache direkt
 > ausliefert — gleich schnell wie vorher, aber ohne dass eine
 > Inhaltsänderung einen Deploy braucht. Kapitel 3.2 beschreibt die Einrichtung,
@@ -55,29 +56,74 @@ angezeigten öffentlichen Schlüssel im jeweiligen GitHub-Repo unter
 
 ## 3. Die Frontends
 
-**Seit dem 24.08.2026 gibt es hier zwei verschiedene Arten von Site**, und die
-Unterscheidung ist die wichtigste dieses Kapitels:
+**Seit dem 25.08.2026 sind alle fünf Frontends Node-Anwendungen.** Die
+Unterscheidung ist nicht mehr statisch/dynamisch, sondern **ob eine Site einen
+Seiten-Cache hat**:
 
-| Domain | Repo | Art |
+| Domain | Repo | Seiten-Cache |
 |---|---|---|
-| `management.tracht-digital.de` | `tds-admin-frontend` | **statisch**, PHP aus |
-| `app.tracht-digital.de` | `tds-customer-frontend` | **statisch**, PHP aus |
-| `tracht-digital.de` | `tds-landingpage-frontend` | **Node-App** (Astro SSR + Seiten-Cache) |
-| `blog.tracht-digital.de` | `tds-blog-frontend` | **Node-App** |
-| `tools.tracht-digital.de` | `tds-tools-frontend` | **Node-App** |
+| `tracht-digital.de` | `tds-landingpage-frontend` | **ja** |
+| `blog.tracht-digital.de` | `tds-blog-frontend` | **ja** |
+| `tools.tracht-digital.de` | `tds-tools-frontend` | **ja** |
+| `management.tracht-digital.de` | `tds-admin-frontend` | **nein** |
+| `app.tracht-digital.de` | `tds-customer-frontend` | **nein** |
 
 **PHP bleibt auf allen fünf aus.** Nur `api.` ist ein PHP-Bundle.
 
-### 3.1 Die beiden statischen Panels
+Die Panels haben bewusst keinen Cache: eine Panel-Seite gehört einem Besucher.
+Der Store legt keine Antwort mit `Set-Cookie` ab und kann nicht nach Identität
+schlüsseln — ein Cache dort würde entweder nichts speichern oder einem Besucher
+die Seite eines anderen ausliefern.
 
-1. *Git → Repository hinzufügen*: Repo-URL, **Branch `release`**, Deploy-Modus
-   „automatisch", Zielpfad = Docroot der Subdomain.
-2. *Hosting-Einstellungen*: **PHP deaktivieren** (rein statische Auslieferung),
-   bevorzugt „nginx direkt ausliefern" für statische Dateien.
-3. **Deploy-Webhook verdrahten** (siehe 3.3).
-4. `management.tracht-digital.de` ist `noindex` und per Token-Gate geschützt; wer
-   zusätzlich abdichten will, legt in Plesk eine IP-Beschränkung oder BasicAuth
-   davor (optional).
+### 3.1 Die beiden Panels (Node, ohne Cache)
+
+Bis zum 25.08.2026 stand hier „PHP deaktivieren, rein statische Auslieferung".
+Das ist überholt: der `release`-Branch beider Panels enthält jetzt `app.cjs`,
+`server/`, `client/`, ein vorgebautes `node_modules/` und `tmp/`.
+
+> **Zuerst umkonfigurieren, dann deployen.** Ein Push des neuen Branches auf eine
+> noch statisch eingerichtete Domain legt das Panel auf *allen* Pfaden lahm.
+
+1. *Git → Repository hinzufügen*: Repo-URL, **Branch `release`**, Zielpfad z. B.
+   `management.tracht-digital.de`.
+2. **Node.js aktivieren** und setzen — identisch zu 3.2, nur ohne die
+   `TDS_CACHE_*`-Variablen:
+
+   | Feld | Wert |
+   |---|---|
+   | Node.js-Version | 22.x |
+   | Application Root | der Zielpfad aus Schritt 1 |
+   | **Document Root** | derselbe Pfad **+ `/client`** |
+   | Application Startup File | `app.cjs` |
+   | Application Mode | `production` |
+
+   Es gibt hier **keine** `TDS_CACHE_DIR`/`TDS_CACHE_META_DIR`, **keinen**
+   `_tds-cache`-Symlink und **keine** `x-tds-cache`-Prüfung. `TDS_SITE_KEY`
+   ebenfalls nicht — Site-Keys gehören zu den öffentlichen Content-Routen.
+3. **Deployment-Aktion** eintragen, sonst läuft nach einem Deploy der alte Code
+   weiter (Passenger hält den Prozess offen):
+   ```sh
+   mkdir -p tmp && touch tmp/restart.txt
+   ```
+4. *Apache & nginx → Zusätzliche Apache-Direktiven*: `PassengerMinInstances 1`.
+   Ohne Cache zahlt hier jede Anfrage den Kaltstart.
+5. **Den SPA-Fallback entfernen** (`try_files … /index.html` bzw. die
+   entsprechende Plesk-Regel). Das ist der Schritt, den man am ehesten vergisst,
+   und er ist lautlos: bleibt er stehen, beantwortet er weiterhin jeden
+   unbekannten Pfad — und jeden fehlgeleiteten relativen API-Aufruf — mit `200`
+   und Dashboard-HTML. Das Panel wirkt dabei völlig gesund.
+6. **Deploy-Webhook verdrahten** (siehe 3.3).
+7. `management.tracht-digital.de` ist `noindex`; wer zusätzlich abdichten will,
+   legt in Plesk eine IP-Beschränkung oder BasicAuth davor (optional).
+
+Danach prüfen — am **Statuscode**, nicht am Aussehen der Seite:
+
+```sh
+curl -sI https://management.tracht-digital.de/gibt-es-nicht | head -1
+# HTTP/2 404   richtig.  200 heisst: der SPA-Fallback lebt noch.
+curl -sI https://management.tracht-digital.de/server/entry.mjs | head -1
+# HTTP/2 404   richtig.  200 heisst: Document Root zeigt auf den App-Root.
+```
 
 ### 3.2 Die drei öffentlichen Sites (Node)
 
@@ -190,6 +236,15 @@ hinterlegen. Die CI pingt sie **per POST** nach jedem **Release** (nicht auf
 > eingerichteten Host braucht — auf einen statisch konfigurierten geschoben,
 > legt sie die Site auf allen Pfaden lahm. Der Deploy ist deshalb der manuelle
 > Knopf.
+
+> **Dasselbe gilt seit dem 25.08.2026 für `tds-admin-frontend`, und dort war es
+> schlimmer.** Sein `release.yml` lief bei jedem Push auf `main` **und** nahm
+> einen Dispatch von jedem `tds-ext-*`-Release an — und `tds-ext-tools-pkg`
+> released bei jedem Push auf sein eigenes `main` automatisch. Ein Commit in
+> einem völlig anderen Repo hat also das Admin-Panel in Produktion deployt.
+> Beide Auslöser sind weg; eine neue `dev.yml` baut `main` weiterhin
+> durchgehend, und der Extension-Dispatch zielt jetzt dorthin.
+> `tds-customer-frontend` war schon vorher nur der manuelle Knopf.
 
 > **`/install` ist eine gewöhnliche Seite der Site.** Der Assistent lief bis
 > 2026-08 als PHP-Datei und wurde hier als Klartext ausgeliefert oder mit 403
@@ -432,6 +487,18 @@ Bundle gebaut wurde.
 
 ## Stolperfallen
 
+- **Ein Panel läuft, aber Listen bleiben leer und nichts steht im Log** → der
+  alte SPA-Fallback (`try_files … /index.html`) steht noch im vhost. Er
+  beantwortet jeden unbekannten Pfad — und jeden fehlgeleiteten relativen
+  API-Aufruf — mit `200` und Dashboard-HTML: `res.ok` ist wahr, `res.json()`
+  fliegt, und der übliche `catch` rendert eine ruhige, dauerhaft leere Liste.
+  **Am Statuscode prüfen, nicht am Aussehen:** `curl -sI …/gibt-es-nicht` muss
+  `404` liefern. Gehört zwingend in dasselbe Fenster wie der erste SSR-Deploy.
+- **Eine Node-Site antwortet nach einem Deploy mit 500** → die App wurde nicht
+  neu gestartet. Astro zerlegt seine Server-Routen in inhaltsgehashte Chunks,
+  die beim ersten Request nachgeladen werden; wird der Baum unter einem
+  laufenden Prozess ausgetauscht, sind alle noch nicht geladenen Routen tot. Die
+  Deployment-Aktion `mkdir -p tmp && touch tmp/restart.txt` fehlt.
 - **`api.` antwortet 404 auf alles** → Docroot zeigt nicht auf `gateway/public`,
   oder das `.htaccess`-Rewrite greift nicht (mod_rewrite/AllowOverride prüfen).
 - **`/healthz` meldet einzelne Services down** → im In-Process-Modus meist eine
