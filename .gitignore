@@ -22,3 +22,10 @@ Desktop.ini
 # Editor backups
 *.swp
 *~
+
+# Local frontend credentials for the `frontends` compose profile
+# (see .env.frontends.example). Per-site overrides: .env.landingpage etc.
+.env.frontends
+.env.landingpage
+.env.blog
+.env.tools

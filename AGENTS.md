@@ -42,6 +42,26 @@ big picture.
     repo is the gateway *app's* local `composer start` config and still carries
     `GATEWAY_MODE=proxy` plus the pre-cutover `GATEWAY_SERVICES`; mapping it let
     that stale file silently flip the container. Override via `.env.docker`.
+  - **`php -S` needs `PHP_CLI_SERVER_WORKERS` in this container, and the reason
+    is `inprocess` itself.** With one worker the built-in server cannot answer a
+    request it makes to *itself* — and it makes one on every authenticated call:
+    the frontend service, running in the gateway's own process, fetches
+    `AUTH_API_URL`'s JWKS over HTTP to verify the session JWT. The self-call
+    waits behind the outer request, times out at five seconds, the verifier gets
+    no keys, and the route answers **401 while nothing failed**. Login still
+    works (auth-api is reached directly, no self-call), so the symptom is a
+    panel that signs in and is then permanently, quietly empty. `status=401
+    time=5.0s` is the fingerprint. The entrypoint sets it to 8; production is
+    PHP-FPM and has always had a pool.
+  - **`API_PORT` is the container port too, not just the published one.** The
+    frontends run with `network_mode: "service:api"`, so `localhost:8080` has to
+    mean the API inside those containers as much as in a browser. Published as
+    `8080:8000` it did not, and the three public sites — which read their
+    content *server-side* from the URL their build baked in — reached nothing.
+    Every content read there is fail-soft, so they served committed placeholder
+    copy with a healthy 200. `deploy/supervisord.docker.conf` therefore takes
+    the port from `TDS_GATEWAY_PORT`, which the entrypoint derives from
+    `API_PORT`.
 - `Config\ServiceRegistry` is the routing table (prefix → `Service`), built
   from env with baked defaults for the current backends. `match($path)` returns
   `[Service, $remainder]`: an explicit prefix (`auth`/`customer`) strips the

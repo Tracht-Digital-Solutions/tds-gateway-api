@@ -30,10 +30,33 @@ DB_PORT=${DB_PORT:-3306}
 DB_USER=${DB_USER:-tds}
 DB_PASS=${DB_PASS:-tds}
 
+# --- the port the gateway listens on INSIDE the container -------------------
+#
+# Equal to the published port on purpose (API_PORT, default 8080), so that
+# `http://localhost:8080` means the API from every angle: in the browser, in
+# this container, and in the frontend containers, which share this network
+# namespace (`network_mode: "service:api"` in docker-compose.yml).
+#
+# It was a fixed 8000 published as 8080 until 2026-08-31. That works for a
+# browser and for nothing else. A public site reads its content SERVER-SIDE
+# from the URL its build baked in — `http://localhost:8080` — and inside a
+# container with a different port there is nothing there. Every content fetch
+# on those sites is deliberately fail-soft, so the site answers 200 with its
+# committed placeholder copy and looks perfectly healthy while being connected
+# to nothing.
+TDS_GATEWAY_PORT=${API_PORT:-8080}
+export TDS_GATEWAY_PORT
+
 # --- shared cross-service settings -----------------------------------------
 ADMIN_TOKEN=${ADMIN_TOKEN:-dev-admin-token-change-me}
-AUTH_API_URL=${AUTH_API_URL:-http://127.0.0.1:8000/auth}
-CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4321}
+AUTH_API_URL=${AUTH_API_URL:-http://127.0.0.1:$TDS_GATEWAY_PORT/auth}
+# Every frontend origin the `frontends` profile publishes. The default was just
+# :4321 until 2026-08-31, which meant the landingpage worked and the other five
+# failed in a way that points nowhere: a browser DISCARDS a cross-origin
+# response whose Access-Control-Allow-Origin does not name the caller exactly,
+# and the panels call with `credentials: "include"`, for which the `*` wildcard
+# is forbidden outright. Keep this in step with the ports in docker-compose.yml.
+CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4321,http://localhost:4322,http://localhost:4323,http://localhost:4324,http://localhost:4325,http://localhost:4326}
 # Exported, not just defaulted: besides landing in each service's .env below,
 # the GATEWAY process reads it for its own two routes (`/` and `/healthz`) —
 # and the gateway is configured from the container environment, not from a
@@ -61,7 +84,7 @@ DB_USER=$DB_USER
 DB_PASS=$DB_PASS
 ADMIN_TOKEN=$ADMIN_TOKEN
 JWT_KEY_ID=${JWT_KEY_ID:-tds-auth-dev-1}
-JWT_ISSUER="${JWT_ISSUER:-http://127.0.0.1:8000/auth}"
+JWT_ISSUER="${JWT_ISSUER:-http://127.0.0.1:$TDS_GATEWAY_PORT/auth}"
 JWT_TTL_SECONDS=${JWT_TTL_SECONDS:-3600}
 JWT_REFRESH_TTL_SECONDS=${JWT_REFRESH_TTL_SECONDS:-2592000}
 COOKIE_DOMAIN=${COOKIE_DOMAIN:-localhost}
@@ -163,7 +186,32 @@ else
   TDS_BACKEND_AUTOSTART=false
 fi
 export TDS_BACKEND_AUTOSTART
-echo "[entrypoint] GATEWAY_MODE=$GATEWAY_MODE (loopback backends autostart: $TDS_BACKEND_AUTOSTART)"
+
+# --- the built-in server must be able to answer ITSELF ----------------------
+#
+# `php -S` handles ONE request at a time unless PHP_CLI_SERVER_WORKERS says
+# otherwise. That default is fatal for this container, and not obviously so.
+#
+# In `inprocess` mode the frontend service runs inside the gateway process, and
+# to verify a session JWT it fetches the auth service's JWKS over HTTP —
+# AUTH_API_URL is http://127.0.0.1:8000/auth, i.e. THIS server. With one
+# worker, that request cannot be accepted until the outer request finishes, and
+# the outer request is what is waiting for it. The fetch times out after five
+# seconds, the verifier has no keys, the principal is anonymous, and the route
+# answers 401.
+#
+# What that looks like from outside is the reason this comment is long: the
+# panel signs in fine (auth-api is reached directly, no self-call), the shell
+# renders, and then every single data call takes 5.01s and comes back 401. No
+# error is logged anywhere, because nothing failed — a request without keys is
+# simply not authenticated. The panel shows its ordinary "no data" state.
+#
+# Forked workers are a development-server concern only; the production host
+# runs PHP-FPM, which has had a process pool all along.
+PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-8}"
+export PHP_CLI_SERVER_WORKERS
+
+echo "[entrypoint] GATEWAY_MODE=$GATEWAY_MODE (loopback backends autostart: $TDS_BACKEND_AUTOSTART, php -S workers: $PHP_CLI_SERVER_WORKERS)"
 
 echo "[entrypoint] starting processes…"
 exec "$@"

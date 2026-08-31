@@ -131,7 +131,7 @@ COPY deploy/docker-entrypoint.sh    /usr/local/bin/tds-entrypoint
 RUN chmod +x /usr/local/bin/tds-entrypoint
 
 # Only the gateway is published; the backends stay on the loopback.
-EXPOSE 8000
+EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/tds-entrypoint"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

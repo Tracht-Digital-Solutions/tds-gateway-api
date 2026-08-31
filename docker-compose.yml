@@ -2,9 +2,10 @@
 #
 #   docker compose up --build
 #
-# That starts MariaDB and the all-in-one API container (gateway :8000 + the
+# That starts MariaDB and the all-in-one API container (gateway :8080 + the
 # backends on the loopback: auth, customer, and the composed frontend API). The
-# gateway is published on http://localhost:8080 by default.
+# gateway listens on and is published as API_PORT (8080) — the same number on
+# both sides, which the frontends profile below depends on.
 #
 #   curl http://localhost:8080/healthz          # aggregated service health
 #   curl http://localhost:8080/tools/catalog    # → frontend (default route)
@@ -14,9 +15,12 @@
 # are read from an optional ./.env.docker (copy .env.docker.example); without it
 # the stack still boots on dev-safe placeholders.
 #
-# The static frontends are optional and off by default (they are normally
-# deployed standalone). Build each one's dist/ first, then:
+# The frontends are optional and off by default (they are normally deployed
+# standalone). Build each product's release/ tree FIRST — with the local API in
+# its build environment, because a frontend compiles its API target into its
+# bundle — then:
 #   docker compose --profile frontends up --build
+# INSTALL-DOCKER.md walks through it.
 
 services:
   db:
@@ -80,28 +84,193 @@ services:
       - path: ./.env.docker
         required: false
     ports:
-      - "${API_PORT:-8080}:8000"
+      - "${API_PORT:-8080}:${API_PORT:-8080}"
+      # The frontends share this container's network namespace
+      # (network_mode: "service:api"), so their published ports belong here.
+      # See the block above the landingpage service for why.
+      - "${LANDING_PORT:-4321}:${LANDING_PORT:-4321}"
+      - "${BLOG_PORT:-4322}:${BLOG_PORT:-4322}"
+      - "${ADMIN_PORT:-4323}:${ADMIN_PORT:-4323}"
+      - "${CUSTOMER_PORT:-4324}:${CUSTOMER_PORT:-4324}"
+      - "${TOOLS_PORT:-4325}:${TOOLS_PORT:-4325}"
+      - "${AUTH_PORT:-4326}:${AUTH_PORT:-4326}"
 
-  # Optional: serve the static frontends from their built dist/ folders.
-  # `docker compose --profile frontends up`. Build each dist/ first
-  # (cd ../tds-landingpage-frontend && npm run build, …).
-  web:
+  # ── The frontends (optional profile) ───────────────────────────────────────
+  #
+  #   docker compose --profile frontends up --build
+  #
+  # Five server-rendered products, each running its own packed release/ tree
+  # (deploy/Dockerfile.frontend), plus the login site, which is the one that is
+  # still genuinely static. Build each product FIRST — and build it with the
+  # local API in its environment, because a frontend's API target is compiled
+  # into its bundle. INSTALL-DOCKER.md walks through it.
+  #
+  # This profile served `dist/` through nginx until 2026-08-31. That has not
+  # been able to work since 2026-08-25, when the last of these products left
+  # `output: "static"`: a build now emits `dist/client` + `dist/server` with no
+  # index.html on top, so every nginx root 403'd. The SPA fallback it carried
+  # was worse than useless — `try_files … /index.html` answers a mis-resolved
+  # API call with 200 and an HTML body, which is exactly the shape that makes a
+  # panel render a calm, permanent empty state instead of an error.
+  #
+  # ── One network namespace for all of them, and why ────────────────────────
+  #
+  # Every frontend runs with `network_mode: "service:api"`, so all seven
+  # processes share ONE loopback: `localhost:8080` is the API, `localhost:4321`
+  # is the landingpage, and so on — inside a container exactly as in the
+  # browser. Their published ports therefore live on the api service above, and
+  # each site listens on the same port it is published as.
+  #
+  # This is not tidiness. Two things break the moment the namespaces differ,
+  # and both break QUIETLY:
+  #
+  #  - **The public sites read their content server-side.** A build points them
+  #    at `http://localhost:8080`, which in an isolated container is that
+  #    container itself — nothing answers, `fetch` throws, and every content
+  #    read is fail-soft by design, so the site serves its committed fallback
+  #    copy and reports a healthy 200. It looks connected. It is not.
+  #    Renaming the target to `http://api:8000` does not help: the same value
+  #    is published to browsers in `tds-runtime.json`, and a browser cannot
+  #    resolve `api`. One namespace is what makes a single value correct on
+  #    both sides.
+  #
+  #  - **A page-cache rebuild re-renders by fetching its own pages back** —
+  #    `fetch(new URL(path, url.origin))` in tds-shared/cache, where the origin
+  #    comes from the incoming request (`http://localhost:4321`). Published as
+  #    `4321:8080` it would reach nothing, and the panel's "Seiten-Cache neu
+  #    bauen" would report a long list of failures for a healthy site.
+  #
+  # Cost of the shared namespace: the frontends have no independent networking,
+  # so `docker compose restart api` takes their connectivity with it, and two
+  # services cannot claim the same port. Change a port via LANDING_PORT etc.;
+  # both halves follow it.
+
+  landingpage:
+    build:
+      dockerfile: deploy/Dockerfile.frontend
+      additional_contexts:
+        site: ../tds-landingpage-frontend
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "${LANDING_PORT:-4321}"
+    # Site key + cache token, read by the site from its process environment —
+    # never as a PUBLIC_ variable, which would ship the credential to every
+    # browser. Both optional: without them the site simply re-renders every
+    # request, and the content routes stay open unless an admin switched
+    # enforcement on.
+    #
+    # These come from a FILE rather than `environment: ${…}` on purpose.
+    # Compose interpolates `${…}` out of the project's ./.env — which in this
+    # repo is the gateway app's own config for `composer start`, not the
+    # container configuration (see the note on the api service). Values put in
+    # ./.env.docker would have interpolated to empty and the site would have
+    # reported `cache_token_not_configured` while the operator was looking at
+    # the value they had just set.
+    #
+    # Copy .env.frontends.example → .env.frontends for values shared by all
+    # three public sites; add .env.<site> when they need to differ (per-site
+    # keys once site-key enforcement is on). Later files win.
+    env_file:
+      - path: ./.env.frontends
+        required: false
+      - path: ./.env.landingpage
+        required: false
+    network_mode: "service:api"
+
+  blog:
+    build:
+      dockerfile: deploy/Dockerfile.frontend
+      additional_contexts:
+        site: ../tds-blog-frontend
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "${BLOG_PORT:-4322}"
+    # See the landingpage service for why these come from a file.
+    env_file:
+      - path: ./.env.frontends
+        required: false
+      - path: ./.env.blog
+        required: false
+    network_mode: "service:api"
+
+  admin:
+    build:
+      dockerfile: deploy/Dockerfile.frontend
+      additional_contexts:
+        site: ../tds-admin-frontend
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "${ADMIN_PORT:-4323}"
+      # Deliberately no TDS_SITE_KEY / TDS_CACHE_TOKEN: a panel has no page
+      # cache (every page is per-visitor) and it authenticates as a PERSON via
+      # the session cookie, not as a site.
+    network_mode: "service:api"
+
+  customer:
+    build:
+      dockerfile: deploy/Dockerfile.frontend
+      additional_contexts:
+        site: ../tds-customer-frontend
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "${CUSTOMER_PORT:-4324}"
+    network_mode: "service:api"
+
+  tools:
+    build:
+      dockerfile: deploy/Dockerfile.frontend
+      additional_contexts:
+        site: ../tds-tools-frontend
+    profiles: ["frontends"]
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "${TOOLS_PORT:-4325}"
+    # See the landingpage service for why these come from a file.
+    env_file:
+      - path: ./.env.frontends
+        required: false
+      - path: ./.env.tools
+        required: false
+    network_mode: "service:api"
+
+  # The login site is the one product that really is static (output: "static"),
+  # so nginx is the right server for it — and the panels cannot be exercised
+  # without it: a logged-out visitor is bounced to PUBLIC_LOGIN_URL, and this
+  # is the only thing that answers there.
+  auth-web:
     image: nginx:1.27-alpine
     profiles: ["frontends"]
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # Sharing the api namespace means nginx must listen on the published
+      # port itself. The official image expands ${…} in /etc/nginx/templates
+      # at start-up, which is why the config is mounted as a template.
+      AUTH_PORT: "${AUTH_PORT:-4326}"
+      # Substitute THIS name and nothing else. Left unfiltered, envsubst also
+      # replaces nginx's own `$uri` — with the empty string, since there is no
+      # such environment variable — and `try_files` silently starts matching
+      # nothing at all.
+      NGINX_ENVSUBST_FILTER: "^AUTH_PORT$$"
     volumes:
-      - ./deploy/nginx.frontends.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../tds-landingpage-frontend/dist:/srv/landingpage:ro
-      - ../tds-blog-frontend/dist:/srv/blog:ro
-      - ../tds-admin-frontend/dist:/srv/admin:ro
-      - ../tds-customer-frontend/dist:/srv/customer:ro
-    ports:
-      - "${LANDING_PORT:-4321}:8081" # landingpage
-      - "${BLOG_PORT:-4322}:8082"    # blog
-      - "${ADMIN_PORT:-4323}:8083"   # admin
-      - "${CUSTOMER_PORT:-4324}:8084" # customer portal
+      - ./deploy/nginx.frontends.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ../tds-auth-frontend/dist:/srv/auth:ro
+    network_mode: "service:api"
 
 volumes:
   db-data:
