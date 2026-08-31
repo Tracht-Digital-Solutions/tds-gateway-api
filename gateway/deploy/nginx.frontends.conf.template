@@ -1,0 +1,25 @@
+# The login site (tds-auth-frontend) for the `frontends` compose profile.
+#
+# This file used to carry four servers, one per frontend, each rooted at a
+# bind-mounted dist/. All four of those products are server-rendered now and
+# are containers of their own (deploy/Dockerfile.frontend); the login site is
+# the only one still `output: "static"`, so it is the only one left here.
+#
+# NOTE the fallback: `=404`, not `/index.html`. A single-page fallback answers
+# EVERY unmatched path with 200 and an HTML body — including a mis-resolved API
+# call, whose caller then sees `res.ok === true`, throws inside `res.json()`,
+# and lands in the usual `.catch(() => setRows([]))`. The result is a page that
+# looks calm and is simply empty forever, with nothing in any log. A 404 is the
+# honest answer and the one that makes the mistake visible.
+
+server {
+    listen ${AUTH_PORT};
+    root /srv/auth;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ $uri.html $uri/index.html =404;
+    }
+
+    error_page 404 /404.html;
+}

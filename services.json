@@ -1,0 +1,8 @@
+{
+  "gateway": { "path": "gateway", "port": 8000 },
+  "services": {
+    "auth":     { "path": "services/auth",     "port": 8003, "public_prefix": "/auth" },
+    "customer": { "path": "services/customer", "port": 8004, "public_prefix": "/customer" },
+    "frontend": { "path": "services/frontend", "port": 8100, "public_prefix": "/", "default": true }
+  }
+}

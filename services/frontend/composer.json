@@ -1,0 +1,113 @@
+{
+  "name": "tracht-digital-solutions/tds-core-frontend-api",
+  "description": "Base panel API kernel (PHP 8 + Slim). Composes extension Modules in-process via frontend-contract into one app — the backend twin of core-frontend.",
+  "type": "project",
+  "license": "proprietary",
+  "version": "0.19.0",
+  "require": {
+    "php": ">=8.2",
+    "firebase/php-jwt": "^7.0",
+    "guzzlehttp/guzzle": "^7.9",
+    "php-di/php-di": "^7.0",
+    "robmorgan/phinx": "^0.16",
+    "slim/psr7": "^1.6",
+    "slim/slim": "^4.13",
+    "symfony/mailer": "^7.4",
+    "symfony/mime": "^7.4",
+    "tracht-digital-solutions/tds-ext-billing": "*",
+    "tracht-digital-solutions/tds-ext-blog-cms": "*",
+    "tracht-digital-solutions/tds-ext-contact-tickets": "*",
+    "tracht-digital-solutions/tds-ext-customers": "*",
+    "tracht-digital-solutions/tds-ext-documents": "*",
+    "tracht-digital-solutions/tds-ext-lexware": "*",
+    "tracht-digital-solutions/tds-ext-live-chat-cta": "*",
+    "tracht-digital-solutions/tds-ext-messages": "*",
+    "tracht-digital-solutions/tds-ext-projects": "*",
+    "tracht-digital-solutions/tds-ext-support-tickets": "*",
+    "tracht-digital-solutions/tds-ext-time-tracker": "*",
+    "tracht-digital-solutions/tds-ext-tools": "*",
+    "tracht-digital-solutions/tds-ext-website-cms": "*",
+    "tracht-digital-solutions/tds-frontend-contract": "^1.11.0",
+    "vlucas/phpdotenv": "^5.6"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5"
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../tds-frontend-contract-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-time-tracker-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-lexware-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-live-chat-cta-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-customers-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-billing-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-tools-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-messages-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-projects-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-documents-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-support-tickets-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-contact-tickets-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-website-cms-pkg"
+    },
+    {
+      "type": "path",
+      "url": "../tds-ext-blog-cms-pkg"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "Tds\\CoreFrontendApi\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tds\\CoreFrontendApi\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "sort-packages": true,
+    "optimize-autoloader": true,
+    "preferred-install": "dist"
+  },
+  "scripts": {
+    "start": "php -S localhost:8100 -t public public/router.php",
+    "test": "phpunit"
+  }
+}

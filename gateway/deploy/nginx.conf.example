@@ -1,0 +1,55 @@
+# Zero-hop alternative to the PHP gateway: let nginx do the prefix routing
+# directly to the upstream ports. Use this OR the PHP gateway, not both.
+#
+# Trailing-slash semantics: `location /auth/ { proxy_pass http://...:8003/; }`
+# strips the /auth prefix (the upstream sees /admin/login). Everything not under
+# /auth or /customer is the composed frontend API's — proxied to :8100 verbatim
+# (no prefix, its module routes live at root).
+
+server {
+    listen 80;
+    server_name api.tracht-digital.de;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+
+    # API responses are machine-to-machine — never index. Mirrors the PHP
+    # gateway's X-Robots-Tag middleware for this zero-hop mode ("always" so it
+    # also lands on 4xx/5xx responses).
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    # Crawl block (belt-and-suspenders with the header above).
+    location = /robots.txt {
+        return 200 "User-agent: *\nDisallow: /\n";
+        add_header Content-Type text/plain;
+    }
+
+    location /auth/ {
+        proxy_pass http://127.0.0.1:8003/;
+    }
+
+    location /customer/ {
+        proxy_pass http://127.0.0.1:8004/;
+    }
+
+    # Catch-all: the composed frontend API (tds-core-frontend-api) owns the whole
+    # root namespace except /auth and /customer — its module routes (/tickets,
+    # /tools, /admin/settings, /me/…, /wiki.json, and any upload-serving routes)
+    # live at root. No trailing slash on proxy_pass → the path is forwarded
+    # unchanged. Upload-serving routes MUST stay on the PHP upstream so their
+    # anti-XSS response headers (nosniff, sandbox CSP, attachment disposition)
+    # are preserved — never shortcut them to a static alias.
+    location / {
+        proxy_pass http://127.0.0.1:8100;
+    }
+
+    location = /healthz {
+        # Point at the PHP gateway if you run it for aggregated health,
+        # or return a static 200 here.
+        return 200 'ok';
+        add_header Content-Type text/plain;
+    }
+}
