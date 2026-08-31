@@ -341,6 +341,28 @@ Migrationen laufen bei jedem Containerstart erneut (idempotent). Den Code
 aktualisierst du mit `docker compose up --build` (zieht den aktuellen Stand
 der `../tds-*`-Checkouts).
 
+> **Wird `api` neu erzeugt, verlieren ALLE Frontends ihr Netzwerk.** Sie teilen
+> sich dessen Netzwerk-Namensraum (`network_mode: "service:api"`); wird der
+> Container ersetzt, ist der Namensraum ein anderer, und die noch laufenden
+> Frontend-Container hängen an einem, den es nicht mehr gibt. Sie sind dann
+> weder von außen erreichbar (`curl` bricht die Verbindung ab) noch selbst
+> auffällig — im Log steht nichts, weil ihnen nichts passiert ist.
+>
+> Das trifft auch `docker compose up -d --build <ein-frontend>`, denn Compose
+> erzeugt dabei die Abhängigkeit mit neu. Deshalb im Zweifel das ganze Profil
+> hochziehen statt einzelner Dienste:
+>
+> ```bash
+> docker compose --profile frontends up -d --build
+> ```
+>
+> Und nach einem gezielten `api`-Neustart die übrigen mitnehmen:
+>
+> ```bash
+> docker compose --profile frontends up -d --force-recreate \
+>   landingpage blog admin customer tools auth-web
+> ```
+
 ## Was der Build aus den Nachbar-Repos NICHT mitnimmt
 
 Jedes als Build-Kontext genutzte Repo (`../tds-auth-api`, `../tds-customer-api`,

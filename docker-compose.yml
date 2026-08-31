@@ -140,10 +140,18 @@ services:
   #    `4321:8080` it would reach nothing, and the panel's "Seiten-Cache neu
   #    bauen" would report a long list of failures for a healthy site.
   #
-  # Cost of the shared namespace: the frontends have no independent networking,
-  # so `docker compose restart api` takes their connectivity with it, and two
-  # services cannot claim the same port. Change a port via LANDING_PORT etc.;
-  # both halves follow it.
+  # Cost of the shared namespace, and it is worth knowing before it happens:
+  # RECREATING `api` LEAVES EVERY RUNNING FRONTEND ATTACHED TO A NAMESPACE THAT
+  # NO LONGER EXISTS. They are then unreachable from outside and completely
+  # silent about it — nothing happened to them. Compose recreates `api` as a
+  # dependency, so even `up -d --build blog` can do it. Bring the profile up as
+  # a whole, or recreate the rest afterwards:
+  #
+  #   docker compose --profile frontends up -d --force-recreate \
+  #     landingpage blog admin customer tools auth-web
+  #
+  # Two services also cannot claim the same port here. Change one via
+  # LANDING_PORT etc.; both halves follow it.
 
   landingpage:
     build:
