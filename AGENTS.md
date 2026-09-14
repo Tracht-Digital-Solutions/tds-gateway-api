@@ -240,6 +240,16 @@ big picture.
   container backs it (host port 33306); the script refuses to pass if the
   server it reaches is not MySQL 8, because a MariaDB there would make the
   whole check succeed vacuously.
+  **It proves the frontend run by COUNT, not by the runner returning.**
+  `MigrationRunner::ensureMigrated()` never throws — a migration that dies
+  mid-run is logged and swallowed, and every migration pending behind it stays
+  unapplied. The step used to accept any non-zero phinxlog, and for a week it
+  printed "applies cleanly" over *"auto-migrate failed: Call to undefined method
+  TimedOutputAdapter::quoteValue()"* with 25 of 58 migrations applied: a
+  website-cms seed called an adapter internal, and in production the shop's
+  newer tables never arrived (its panel answered HTTP 500). It now compares the
+  applied versions with every `NNNNNNNNNNNNNN_*.php` in the composed paths and
+  names the first unapplied files.
 - **Don't make the services depend on the gateway, or read env outside their
   `Bootstrap`.** The in-process env scope only brackets `createApp`; an action
   reading `getenv()` at request time would escape it.

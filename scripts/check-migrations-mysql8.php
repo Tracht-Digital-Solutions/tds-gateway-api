@@ -135,10 +135,20 @@ if ($paths === []) {
         ))->ensureMigrated();
 
         $applied = appliedCount($host, $port, $frontendDb, $user, $pass, 'phinxlog');
-        echo "frontend: {$applied} migration(s) applied.\n";
+        $expected = migrationFiles($paths);
+        echo "frontend: {$applied} of " . count($expected) . " migration(s) applied.\n";
 
-        if ($applied === 0) {
-            $failures[] = 'frontend: the runner completed but applied nothing — the phinxlog is empty.';
+        // The runner NEVER throws: a migration that dies mid-run is logged and
+        // swallowed, and every migration pending behind it stays unapplied.
+        // So "it returned" proves nothing — only the count against the set does.
+        // A seed migration calling an adapter method Phinx's TimedOutputAdapter
+        // does not have stopped the run at 25 applied for a week, and this step
+        // printed "applies cleanly" the whole time.
+        if ($applied < count($expected)) {
+            $missing = array_diff_key($expected, array_flip(appliedVersions($host, $port, $frontendDb, $user, $pass)));
+            $failures[] = 'frontend: only ' . $applied . ' of ' . count($expected)
+                . ' migrations applied — the run stopped. First unapplied: '
+                . implode(', ', array_slice($missing, 0, 5)) . '.';
         }
     } catch (\Throwable $e) {
         $failures[] = 'frontend: ' . get_class($e) . ': ' . $e->getMessage();
@@ -202,6 +212,35 @@ function appliedCount(
     $pdo = connect($host, $port, $user, $pass, $db);
 
     return (int) $pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
+}
+
+/**
+ * Every migration file the composed paths contain, keyed by version.
+ *
+ * @param  list<string> $paths
+ * @return array<int, string> version => file name, in version order
+ */
+function migrationFiles(array $paths): array
+{
+    $files = [];
+    foreach ($paths as $path) {
+        foreach (glob(rtrim($path, '/\\') . '/*.php') ?: [] as $file) {
+            if (preg_match('/^(\d{14})_/', basename($file), $m) === 1) {
+                $files[(int) $m[1]] = basename($file);
+            }
+        }
+    }
+    ksort($files);
+
+    return $files;
+}
+
+/** @return list<int> the versions the phinxlog records as applied */
+function appliedVersions(string $host, string $port, string $db, string $user, string $pass): array
+{
+    $pdo = connect($host, $port, $user, $pass, $db);
+
+    return array_map('intval', $pdo->query('SELECT version FROM `phinxlog`')->fetchAll(PDO::FETCH_COLUMN));
 }
 
 /** A throwaway Phinx config, so each repo's own phinx.php env handling is irrelevant here. */
