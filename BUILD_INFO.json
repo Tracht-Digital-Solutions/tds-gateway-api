@@ -1,0 +1,27 @@
+{
+  "built_at": "2026-09-14T13:38:26Z",
+  "trigger": "push",
+  "sources": {
+    "gateway":  "feffbc5b21784be6d8fa56ec639a775589db9367",
+    "auth":     "79f027153906ad173eb0d677b9e29742d68bba7b",
+    "customer": "18db0c69247184e3a8d0c10f59f55d2de8ca3233",
+    "frontend": "7dbd11a64f88d0b9677457cfea5ab8623ec3d781"
+  },
+  "frontend_extensions": {
+    "contract":     "8af00bec5e453ca93dfa859893c02268a1765f7e",
+    "time-tracker": "260e376fe9581352ef989fce9fa34bd854845a13",
+    "customers":    "f577a67366f90ddf3f7da1414cef2343451e1401",
+    "billing":      "562b8573ca8c16bc23b80f71af7188e576b41068",
+    "lexware":      "c5cedc7fab051c8c19d52b2d1e3acb08008e1ff1",
+    "tools":        "316f74c716b1d362121d6966894a1c022441b8e7",
+    "messages":     "8197ddf1b9688ec3b0352ba3921569c375344151",
+    "projects":     "88845f411d23c1f7ad729cc9fb2184b7fdd0a227",
+    "documents":    "2efa71e46e805135a2cca4166cb2db467366cd89",
+    "support-tickets": "f8a33b510ebaec57d06bdfdf916a409bd81df9f1",
+    "contact-tickets": "8afa35a16c728f9916227600fa6f2d98194b689f",
+    "live-chat-cta": "8337d548f4734bfb96ccc85d0c485c349c0a4034",
+    "website-cms":  "bfb9867e266df7026a13932c3f1eda0d6ae635b4",
+    "blog-cms":     "afd98b4e660c7865afccc524b9b1e0c6ac36e091",
+    "shop":         "e6f0ec49b4b87555e44014317b6cfc7fc2aa8203"
+  }
+}

@@ -1,0 +1,13 @@
+---
+// Admin project-management page (owner side), injected via the manifest's route
+// slot at /admin/projects and gated by projects:manage (admins only). Renders the
+// owner management island: create/edit projects + milestones across all companies.
+import ProjectsAdmin from "../islands/ProjectsAdmin.tsx";
+---
+
+<section class="tds-page">
+  <div class="tds-page__head">
+    <h1 class="tds-page__title">Projekte verwalten</h1>
+  </div>
+  <ProjectsAdmin client:load />
+</section>

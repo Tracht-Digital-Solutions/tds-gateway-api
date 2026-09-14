@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.7
+#
+# Runs ONE server-rendered frontend from its packed `release/` tree.
+#
+# Every frontend product — landingpage, blog, tools, admin panel, customer
+# portal — is the same shape since 2026-08-25: an Astro app with the standalone
+# Node adapter, packed by `scripts/pack-release.mjs` into
+#
+#   release/app.cjs        startup file (CommonJS; imports server/entry.mjs)
+#   release/server/        the SSR bundle, first-party packages inlined
+#   release/client/        static assets + prerendered pages
+#   release/package.json   PUBLIC-registry runtime deps only
+#
+# So one Dockerfile serves all five. The product is chosen by the named build
+# context; see the `frontends` profile in docker-compose.yml.
+#
+#   docker build -f deploy/Dockerfile.frontend \
+#     --build-context site=../tds-blog-frontend -t tds-blog .
+#
+# ── Why the release tree and not `dist/` ────────────────────────────────────
+#
+# `dist/` is `dist/client` + `dist/server` and has no startup file, no
+# manifest and no node_modules. It is not runnable on its own. The profile
+# used to mount `dist/` as an nginx document root, which stopped being
+# possible the day these products left `output: "static"` — an nginx root
+# needs an `index.html` at the top, and there is none.
+#
+# ── Why no NPM_TOKEN ────────────────────────────────────────────────────────
+#
+# `release/package.json` lists only public packages (astro, @astrojs/node,
+# react, react-dom, and sharp on the two image-heavy sites). Every first-party
+# `@tracht-digital-solutions/*` package is BUNDLED INTO `server/` by the build
+# (`vite.ssr.noExternal`), and pack-release fails the build if one leaked. So
+# this install needs no GitHub Packages credential — which is the whole reason
+# the container can rebuild the dependency tree for Linux.
+#
+# ── Why the dependencies are installed again ────────────────────────────────
+#
+# `release/node_modules` on a developer machine is installed for that machine.
+# On Windows it holds win32 binaries (`sharp` most visibly), which Linux cannot
+# load. The frontend repos' `.dockerignore` therefore excludes `**/node_modules`
+# from the build context, and this stage installs a Linux tree instead. Without
+# that exclusion the context transfer would also carry ~170 MB per site for
+# files that are about to be thrown away.
+
+FROM node:22-bookworm-slim
+
+WORKDIR /app
+
+# Manifest first so the (slow) install layer caches across content edits.
+COPY --from=site release/package.json ./package.json
+RUN npm install --omit=dev --no-package-lock --no-audit --no-fund
+
+# Then the application itself. `release/node_modules` is not in the context.
+COPY --from=site release/ ./
+
+# HOST is the one that matters: @astrojs/node's standalone entry binds
+# 127.0.0.1 by default, which inside a container means "reachable by nobody".
+# PORT is set per service in docker-compose.yml.
+ENV HOST=0.0.0.0 \
+    NODE_ENV=production \
+    PORT=8080
+
+# app.cjs exists for Passenger, where `listen()` is patched and HOST/PORT are
+# decoration. Here nothing patches it, so the standalone server really does
+# read both — the startup file works in either world unchanged.
+CMD ["node", "app.cjs"]
