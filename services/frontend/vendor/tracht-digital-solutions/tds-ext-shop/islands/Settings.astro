@@ -1,0 +1,11 @@
+---
+// TDShop settings, rendered by the base Einstellungen host via
+// virtual:frontend-settings. The Amazon credentials live in the core's runtime
+// settings store (namespace `shop`), encrypted with SETTINGS_ENCRYPTION_KEY —
+// never in .env, and never in a PUBLIC_ variable.
+import ShopSettings from "./ShopSettings.tsx";
+---
+
+<div class="tds-settings-section__body">
+  <ShopSettings client:load />
+</div>
