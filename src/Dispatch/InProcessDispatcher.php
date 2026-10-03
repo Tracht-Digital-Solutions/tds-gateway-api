@@ -24,10 +24,10 @@ use Slim\App;
  *  1. Autoloading — each service ships its own vendor/. We require the target
  *     service's autoloader on demand; service namespaces are disjoint
  *     (Tds\AuthApi\… vs Tds\CustomerApi\…) and the shared libraries (Slim,
- *     php-di, phpdotenv) load once and are reused. The bundle is assembled from
- *     all repos at once with identical version constraints, so the per-service
- *     copies of the shared libs are the same version — "first loaded wins" is
- *     therefore safe.
+ *     php-di, phpdotenv) load once and are reused — "first loaded wins". The
+ *     per-service copies are NOT guaranteed to be the same version (they drift;
+ *     `scripts/check-shared-deps.php` reports it), so a shared library's major
+ *     version must stay compatible across services.
  *
  *  2. Env isolation — every service's Bootstrap does
  *     Dotenv::createImmutable($rootDir)->load() and reads $_ENV/getenv. A reused

@@ -38,7 +38,20 @@ declare(strict_types=1);
  * for the keypair.
  */
 
-session_start();
+session_start([
+    'cookie_httponly' => true,
+    'cookie_samesite' => 'Strict',
+    'cookie_secure' => (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off'),
+]);
+// Every POST must carry this token. The wizard writes .env files and the
+// done screen deletes this file — without a token a page elsewhere could
+// submit either on the operator's behalf.
+$_SESSION['tds_install_csrf'] ??= bin2hex(random_bytes(16));
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && !hash_equals((string) $_SESSION['tds_install_csrf'], (string) ($_POST['__csrf'] ?? ''))) {
+    http_response_code(403);
+    exit('Ungültige oder abgelaufene Sitzung. Bitte die Seite neu laden.');
+}
 
 $GATEWAY_DIR = dirname(__DIR__);                 // <bundle>/gateway
 $BUNDLE_DIR  = dirname($GATEWAY_DIR);            // <bundle>
@@ -287,21 +300,30 @@ function create_admin_account(array $c): array
             $c['db_pass'],
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5]
         );
+        // NOW() below must mean Berlin, like every service's pinned session.
+        // A numeric offset works without the server's time-zone tables.
+        $pdo->exec("SET time_zone = '" . (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('P') . "'");
         $find = $pdo->prepare('SELECT id FROM app_user WHERE email = :email LIMIT 1');
         $find->execute(['email' => $email]);
         $existingId = $find->fetchColumn();
 
         if ($existingId !== false) {
-            // Bestehendes Konto (z. B. vom Seed) zum aktiven Admin machen —
-            // Passwort NICHT überschreiben, damit ein bereits gesetztes bleibt.
-            $pdo->prepare('UPDATE app_user SET is_admin = 1, status = \'active\', updated_at = NOW() WHERE id = :id')
-                ->execute(['id' => (int) $existingId]);
-            return [true, "Bestehendes Konto {$email} zum Admin gemacht (ID {$existingId})."];
+            // Bestehendes Konto (meist der Seed mit dem öffentlichen
+            // Standardpasswort) zum aktiven Admin machen UND das hier gewählte
+            // Passwort setzen. Vorher blieb das Seed-Passwort stehen, während
+            // der Abschlussbildschirm das gewählte anzeigte — das nie ging.
+            $pdo->prepare(
+                'UPDATE app_user SET is_admin = 1, status = \'active\', password_hash = :hash, '
+                . 'must_change_password = 1, updated_at = NOW() WHERE id = :id'
+            )->execute(['id' => (int) $existingId, 'hash' => $hash]);
+            return [true, "Bestehendes Konto {$email} zum Admin gemacht, Passwort gesetzt (ID {$existingId})."];
         }
 
         $ins = $pdo->prepare(
             'INSERT INTO app_user '
-            . '(email, password_hash, name, is_admin, customer_id, permissions, status, must_change_password, created_at, updated_at) '
+            // `company_id`: auth migration 20260814000001 renamed the column;
+            // with `customer_id` this INSERT failed on every fresh install.
+            . '(email, password_hash, name, is_admin, company_id, permissions, status, must_change_password, created_at, updated_at) '
             . "VALUES (:email, :hash, 'Setup-Admin', 1, NULL, '[]', 'active', 1, NOW(), NOW())"
         );
         $ins->execute(['email' => $email, 'hash' => $hash]);
@@ -881,7 +903,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
   <?php elseif ($step === 2): ?>
     <h2>Datenbank verbinden</h2>
     <p>MariaDB/MySQL-Zugangsdaten. Je Service eine eigene Datenbank (verhindert Kollisionen der Migrations-Tabellen).</p>
-    <form method="post">
+    <form method="post"><input type="hidden" name="__csrf" value="<?= h((string) $_SESSION['tds_install_csrf']) ?>" />
       <input type="hidden" name="__step" value="2" />
       <div class="row">
         <div><label>Host</label><input type="text" name="db_host" value="<?= h(cfg('db_host', '127.0.0.1')) ?>" /></div>
@@ -907,7 +929,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
   <?php elseif ($step === 3): ?>
     <h2>Konfiguration</h2>
     <p>Geheimnisse + Dienst-URLs. Vorgaben sind sinnvoll voreingestellt. Drittanbieter-Schlüssel (Stripe, E-Mail/Resend, GitHub) werden hier <strong>nicht mehr</strong> gesetzt — sie konfigurierst du nach der Installation im Admin-Panel unter „Einstellungen“ bzw. dem Einrichtungsassistenten.</p>
-    <form method="post">
+    <form method="post"><input type="hidden" name="__csrf" value="<?= h((string) $_SESSION['tds_install_csrf']) ?>" />
       <input type="hidden" name="__step" value="3" />
       <fieldset>
         <legend>Kern</legend>
@@ -984,7 +1006,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       <div class="note err">
         <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.
       </div>
-      <form method="post" onsubmit="return confirm('install.php endgültig löschen?');">
+      <form method="post" onsubmit="return confirm('install.php endgültig löschen?');"><input type="hidden" name="__csrf" value="<?= h((string) $_SESSION['tds_install_csrf']) ?>" />
         <input type="hidden" name="__action" value="self_delete" />
         <button class="btn" type="submit">install.php jetzt löschen</button>
       </form>
@@ -992,7 +1014,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
 
     <noscript>
       <div class="note warn">JavaScript ist deaktiviert — die Installation läuft als ein einzelner Vorgang (kann ein bis zwei Minuten dauern, kein Fortschrittsbalken).</div>
-      <form method="post">
+      <form method="post"><input type="hidden" name="__csrf" value="<?= h((string) $_SESSION['tds_install_csrf']) ?>" />
         <input type="hidden" name="__step" value="4" />
         <button class="btn" type="submit">Jetzt installieren →</button>
       </form>
@@ -1037,6 +1059,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
       function runTask(id) {
         var body = new URLSearchParams();
         body.set('__task', id);
+        body.set('__csrf', <?= json_encode((string) $_SESSION['tds_install_csrf']) ?>);
         return fetch(window.location.pathname, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
@@ -1136,7 +1159,7 @@ $steps = [1 => 'Voraussetzungen', 2 => 'Datenbank', 3 => 'Konfiguration', 4 => '
     <div class="note err">
       <strong>Sicherheit:</strong> Bitte löschen Sie jetzt <code>gateway/public/install.php</code>.
     </div>
-    <form method="post" onsubmit="return confirm('install.php endgültig löschen?');">
+    <form method="post" onsubmit="return confirm('install.php endgültig löschen?');"><input type="hidden" name="__csrf" value="<?= h((string) $_SESSION['tds_install_csrf']) ?>" />
       <input type="hidden" name="__action" value="self_delete" />
       <button class="btn" type="submit">install.php jetzt löschen</button>
     </form>

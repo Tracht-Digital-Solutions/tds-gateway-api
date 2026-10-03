@@ -22,10 +22,12 @@ namespace Tds\ApiGateway\Support;
  * works where the subprocess path can't; that path is kept only as a fallback.
  *
  * Safety properties:
- *  - **Idempotent & cheap steady-state.** A marker file keyed to the *set of
- *    migration files* short-circuits every request once applied — the hot path
- *    is a single `is_file()`. The marker name changes only when a migration is
- *    added/removed, which is exactly when we want to re-run.
+ *  - **Idempotent steady-state.** A marker file keyed to the *set of
+ *    migration files* short-circuits every request once applied. Deriving that
+ *    key lists each service's migration directory (`signature()`), so the hot
+ *    path is a few directory reads plus one `is_file()`. The marker name
+ *    changes only when a migration is added/removed, which is exactly when we
+ *    want to re-run.
  *  - **Single-flight.** An exclusive, non-blocking `flock` means only the first
  *    worker after a deploy migrates; concurrent workers skip and serve normally.
  *  - **Never fatal.** Any failure is logged and swallowed — a migration hiccup
@@ -48,7 +50,7 @@ final class MigrationRunner
 
     /**
      * @param string   $servicesDir  <bundle>/services (each holds <name>/vendor + phinx.php + db/migrations).
-     * @param string[] $serviceNames Service dir names to migrate, e.g. ['auth','contact','content','customer'].
+     * @param string[] $serviceNames Service dir names to migrate, e.g. ['auth','customer'].
      * @param string   $stateDir     Preferred dir for the marker + lock (falls back to the system temp dir when unwritable).
      * @param (callable(string $serviceDir): array{0: bool, 1: string})|null $migrate
      *        Runs one service's migrations, returns [ok, output]. Defaults to

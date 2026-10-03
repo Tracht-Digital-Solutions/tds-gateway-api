@@ -80,10 +80,7 @@ final class Bootstrap
         if ($inProcess) {
             // Services live next to the gateway in the assembled bundle:
             // <bundle>/gateway (rootDir) + <bundle>/services/<name>.
-            $servicesDir = rtrim(
-                $env('GATEWAY_SERVICES_DIR', \dirname($rootDir) . '/services'),
-                '/\\',
-            );
+            $servicesDir = self::servicesDir($rootDir);
 
             $container->set(InProcessDispatcher::class, static function (Container $c) use ($servicesDir) {
                 $services = [];
@@ -194,7 +191,7 @@ final class Bootstrap
             return;
         }
 
-        $servicesDir = rtrim($env('GATEWAY_SERVICES_DIR', \dirname($rootDir) . '/services'), '/\\');
+        $servicesDir = self::servicesDir($rootDir);
 
         $runner = new MigrationRunner(
             servicesDir: $servicesDir,
@@ -210,6 +207,20 @@ final class Bootstrap
      * `$_ENV[$key] ?? getenv($key) ?: $default`, which clobbers falsy values
      * because `??` binds tighter than `?:` (the bug that bit all four APIs).
      */
+    /**
+     * `<bundle>/services`, unless GATEWAY_SERVICES_DIR names another place.
+     *
+     * EMPTY counts as unset: `.env.example` ships `GATEWAY_SERVICES_DIR=`, and
+     * `env()`'s default only applies to an absent key — so a hand-copied
+     * `.env` made the dir `''`, every dispatch failed with "Service autoloader
+     * missing: /auth/vendor/autoload.php" and auto-migration silently skipped.
+     */
+    private static function servicesDir(string $rootDir): string
+    {
+        $configured = trim(self::env('GATEWAY_SERVICES_DIR', ''));
+        return rtrim($configured !== '' ? $configured : \dirname($rootDir) . '/services', '/\\');
+    }
+
     private static function env(string $key, ?string $default = null): string
     {
         $value = $_ENV[$key] ?? false;
