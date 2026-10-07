@@ -76,7 +76,7 @@ in-process migrator when its app is first built. Both are guarded to run at most
 once per migration-set (a marker + single-flight `flock`) and are best-effort —
 a failure is logged and surfaced as `db:no-schema` in `/healthz` rather than
 taking the gateway down. In-process mode only; disable with
-`GATEWAY_AUTO_MIGRATE=0`. See `AGENTS.md` → *Auto-migration* for the full contract.
+`GATEWAY_AUTO_MIGRATE=0`. See `docs/agents/migrations.md` for the full contract.
 
 ## API wiki
 
