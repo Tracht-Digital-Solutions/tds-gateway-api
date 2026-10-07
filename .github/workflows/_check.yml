@@ -31,3 +31,7 @@ jobs:
         run: find src tests -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
       - name: PHPUnit
         run: composer test
+      # tds-gateway-api#7. The gateway's own production dependencies; the
+      # services are audited in _assemble.yml, on the tree that ships.
+      - name: Composer audit (fails on high/critical)
+        run: php scripts/composer-audit.php .

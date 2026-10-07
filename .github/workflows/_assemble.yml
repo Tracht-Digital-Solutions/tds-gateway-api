@@ -196,6 +196,14 @@ jobs:
             echo "::endgroup::"
           done
 
+      # tds-gateway-api#7. Audit what SHIPS: each service's production tree as
+      # installed above (the frontend with its extensions mirrored in, phinx
+      # added). A high or critical advisory fails the assemble; lower ones are
+      # warning annotations. auth/customer also audit in their own CI, but only
+      # this run sees the frontend bundle — that service has no CI of its own.
+      - name: Composer audit of the shipped services (fails on high/critical)
+        run: php _src/gateway/scripts/composer-audit.php _src/gateway _src/auth _src/customer _src/frontend
+
       # In-process mode loads every service's autoloader into ONE PHP process,
       # and Composer autoloaders are first-come-first-served per class name — so
       # for a package two services share, whichever is dispatched first wins for

@@ -368,6 +368,16 @@ back to `GITHUB_TOKEN`. A missing `ASSEMBLE_TOKEN` therefore fails `assemble`
 at the first cross-repo checkout while `check` stays green (no secrets needed).
 That asymmetric failure is the tell for an unset/expired token.
 
+- **`composer audit` gates what ships (tds-gateway-api#7, 2026-10-07).**
+  `scripts/composer-audit.php` runs `composer audit --no-dev` per directory and
+  fails on a `high`/`critical` advisory; lower ones are warning annotations, an
+  audit that cannot run only warns. `_assemble.yml` runs it over the installed
+  production trees of gateway, auth, customer and frontend — the only place the
+  frontend bundle (no CI of its own) is audited; `_check.yml` covers the gateway.
+  The policy is `scripts/lib/composer_audit_policy.php`, pinned by
+  `tests/Support/ComposerAuditPolicyTest.php`. Locally:
+  `COMPOSER_BIN="php composer.phar" php scripts/composer-audit.php . ../tds-auth-api`.
+
 ## API wiki (moved out of the gateway)
 
 - The gateway **no longer serves the API wiki.** It is owned by the composed
