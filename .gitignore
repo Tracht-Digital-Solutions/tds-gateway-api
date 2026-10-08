@@ -29,3 +29,9 @@ Desktop.ini
 .env.landingpage
 .env.blog
 .env.tools
+
+# Local agent state
+.claude/
+
+# Not tracked: vendor/ is assembled in CI or on the host
+/composer.lock
