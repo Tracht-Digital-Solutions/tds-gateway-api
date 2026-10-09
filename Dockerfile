@@ -29,6 +29,7 @@
 #     --build-context ext_website_cms=../tds-ext-website-cms-pkg \
 #     --build-context ext_blog_cms=../tds-ext-blog-cms-pkg \
 #     --build-context ext_shop=../tds-ext-shop-pkg \
+#     --build-context ext_cards=../tds-ext-cards-pkg \
 #     -t tds-api .
 #
 # `docker compose up` wires those contexts for you (see docker-compose.yml).
@@ -61,6 +62,7 @@ COPY --from=ext_live_chat_cta . ./tds-ext-live-chat-cta-pkg/
 COPY --from=ext_website_cms   . ./tds-ext-website-cms-pkg/
 COPY --from=ext_blog_cms      . ./tds-ext-blog-cms-pkg/
 COPY --from=ext_shop          . ./tds-ext-shop-pkg/
+COPY --from=ext_cards         . ./tds-ext-cards-pkg/
 
 # Prod deps for the gateway + the two prefixed backends, then re-add phinx for
 # those two (they keep it in require-dev, but the running container needs the
