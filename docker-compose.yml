@@ -66,6 +66,7 @@ services:
         ext_blog_cms: ../tds-ext-blog-cms-pkg
         ext_shop: ../tds-ext-shop-pkg
         ext_cards: ../tds-ext-cards-pkg
+        ext_analytics: ../tds-ext-analytics-pkg
     restart: unless-stopped
     depends_on:
       db:
