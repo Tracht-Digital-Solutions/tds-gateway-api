@@ -1,0 +1,300 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { primeRuntimeConfig } from "@tracht-digital-solutions/tds-shared/api";
+import { resetCache } from "@tracht-digital-solutions/tds-shared/data";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import BlogRegistry from "./BlogRegistry";
+import { TOAST_EVENT } from "@tracht-digital-solutions/tds-shared/toast";
+
+/**
+ * The managed-blogs registry, in Einstellungen.
+ *
+ * This is where a blog is added and connected to its public site. The tests
+ * pin the immutable registry key, one-click pairing, explicit content binding
+ * and truthful cache outcomes.
+ */
+
+type Hit = { status?: number; body?: unknown; unreachable?: boolean };
+let handlers: Array<(url: string, init?: RequestInit) => Hit | undefined> = [];
+let calls: Array<{ url: string; method: string; body: unknown }> = [];
+
+const pathOf = (url: string) => String(url).replace(/^https?:\/\/[^/]+/i, "");
+
+function respond(match: RegExp, body: unknown, status = 200, method?: string) {
+  handlers.unshift((url, init) => {
+    if (!match.test(pathOf(url))) return undefined;
+    if (method && (init?.method ?? "GET") !== method) return undefined;
+    return { status, body };
+  });
+}
+
+/** A request that never reaches the API: fetch itself rejects, as it does offline. */
+function unreachable(match: RegExp, method?: string) {
+  handlers.unshift((url, init) => {
+    if (!match.test(pathOf(url))) return undefined;
+    if (method && (init?.method ?? "GET") !== method) return undefined;
+    return { unreachable: true };
+  });
+}
+
+let toasts: Array<{ variant: string; message: string }> = [];
+const collectToast = (e: Event) => {
+  toasts.push((e as CustomEvent<{ variant: string; message: string }>).detail);
+};
+
+beforeEach(() => {
+  resetCache();
+  primeRuntimeConfig(null);
+  toasts = [];
+  window.addEventListener(TOAST_EVENT, collectToast);
+  handlers = [];
+  calls = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+      });
+      for (const h of handlers) {
+        const hit = h(url, init);
+        if (hit) {
+          if (hit.unreachable) throw new TypeError("Failed to fetch");
+          const status = hit.status ?? 200;
+          return { ok: status >= 200 && status < 300, status, json: async () => hit.body ?? {} } as Response;
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    }),
+  );
+});
+
+afterEach(() => {
+  window.removeEventListener(TOAST_EVENT, collectToast);
+  cleanup();
+  resetCache();
+});
+
+const user = () => userEvent.setup({ delay: null });
+
+const BLOG = {
+  id: 1,
+  blog_key: "haupt",
+  name: "Hauptblog",
+  updated_at: "2026-01-01",
+};
+
+async function renderRegistry(
+  blogs: unknown[] = [BLOG],
+  websites: unknown[] = [],
+) {
+  // Method-scoped: `respond` puts the newest matcher first, so an unscoped GET
+  // handler registered here would also answer a POST a test set up earlier.
+  respond(/\/blogs$/, { blogs }, 200, "GET");
+  respond(/\/cms\/sites$/, { sites: websites }, 200, "GET");
+  respond(/\/blogs\/[^/]+\/connection$/, {}, 404, "GET");
+  render(<BlogRegistry />);
+  await waitFor(() => expect(calls.some((c) => pathOf(c.url) === "/blogs")).toBe(true));
+  return user();
+}
+
+const posts = () => calls.filter((c) => c.method === "POST");
+
+describe("adding a blog", () => {
+  it("posts a valid kebab key and name", async () => {
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "shop");
+    await u.type(screen.getByLabelText("Name"), "Shop");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(pathOf(posts()[0]!.url)).toBe("/blogs");
+    expect(posts()[0]!.body).toMatchObject({ blog_key: "shop", name: "Shop" });
+  });
+
+  it("refuses an invalid key before it reaches the API", async () => {
+    // The key is the join between the content and the public site and cannot
+    // be changed afterwards, so a typo is a site nobody can edit.
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "Shop Site");
+    await u.type(screen.getByLabelText("Name"), "Shop");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("refuses a blank name", async () => {
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "shop");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("reports the HTTP status when the create fails", async () => {
+    // 409 (already exists) and 403 (not allowed) need very different fixes.
+    respond(/\/blogs$/, {}, 409, "POST");
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "haupt");
+    await u.type(screen.getByLabelText("Name"), "Nochmal");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    await waitFor(() => expect(toasts.length).toBeGreaterThan(0));
+    expect(toasts[toasts.length - 1]!.message).toContain("409");
+  });
+
+  it("releases the form when the create never reaches the API", async () => {
+    // fetch rejects offline; unhandled, the button stayed on its spinner.
+    unreachable(/\/blogs$/, "POST");
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "shop");
+    await u.type(screen.getByLabelText("Name"), "Shop");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    await waitFor(() => expect(toasts.some((t) => t.variant === "danger" && t.message.includes("Netzwerkfehler"))).toBe(true));
+    expect((screen.getByLabelText("Schlüssel") as HTMLInputElement).value).toBe("shop");
+    expect(screen.getByRole("button", { name: "Blog hinzufügen" })).toBeTruthy();
+  });
+
+  it("clears the form after a successful create", async () => {
+    const u = await renderRegistry([]);
+    await u.type(screen.getByLabelText("Schlüssel"), "shop");
+    await u.type(screen.getByLabelText("Name"), "Shop");
+    await u.click(screen.getByRole("button", { name: "Blog hinzufügen" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    await waitFor(() => expect((screen.getByLabelText("Schlüssel") as HTMLInputElement).value).toBe(""));
+  });
+});
+
+describe("per-blog API connection", () => {
+  it("pairs the blog and exposes a direct-install fallback only as a URL fragment", async () => {
+    const fallback = "https://blog.example/install#pairing_token=once-only-secret";
+    respond(/\/blogs\/haupt\/connection\/pairing$/, {
+      delivered: false,
+      fallback_url: fallback,
+    }, 201, "POST");
+    const u = await renderRegistry();
+    await u.type(await screen.findByLabelText("Adresse des öffentlichen Blogs"), "https://blog.example");
+    await u.click(screen.getByRole("button", { name: "Mit API verbinden" }));
+
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(pathOf(posts()[0]!.url)).toBe("/blogs/haupt/connection/pairing");
+    expect(posts()[0]!.body).toEqual({ origin: "https://blog.example", profile: "blog", bindings: {} });
+    expect(JSON.stringify(posts()[0]!.body)).not.toContain("once-only-secret");
+    expect((await screen.findByRole("link", { name: "Einrichtungslink öffnen" })).getAttribute("href")).toBe(fallback);
+  });
+
+  it("requires an explicit website when more than one can provide global content", async () => {
+    respond(/\/blogs\/haupt\/connection\/pairing$/, { delivered: true }, 201, "POST");
+    const u = await renderRegistry([BLOG], [
+      { site_key: "agentur", name: "Agentur" },
+      { site_key: "landing", name: "Landingpage" },
+    ]);
+    await u.type(await screen.findByLabelText("Adresse des öffentlichen Blogs"), "https://blog.example");
+    const connect = screen.getByRole("button", { name: "Mit API verbinden" });
+    expect((connect as HTMLButtonElement).disabled).toBe(true);
+    await u.selectOptions(screen.getByLabelText(/Website-Inhalte verwenden/), "landing");
+    await u.click(connect);
+
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]!.body).toMatchObject({ bindings: { website: "landing" } });
+  });
+
+  it("shows the reason the API gives for a failed pairing", async () => {
+    // Without log access this line is the operator's only diagnosis.
+    respond(/\/blogs\/haupt\/connection\/pairing$/, {
+      error: "SETTINGS_ENCRYPTION_KEY ist für sichere Site-Verbindungen erforderlich.",
+      code: "encryption_not_configured",
+    }, 503, "POST");
+    const u = await renderRegistry();
+    await u.type(await screen.findByLabelText("Adresse des öffentlichen Blogs"), "https://blog.example");
+    await u.click(screen.getByRole("button", { name: "Mit API verbinden" }));
+    expect(await screen.findByText(
+      "Verbinden fehlgeschlagen (HTTP 503): SETTINGS_ENCRYPTION_KEY ist für sichere Site-Verbindungen erforderlich.",
+    )).toBeTruthy();
+  });
+
+  it("falls back to the status code when the API gives no reason", async () => {
+    respond(/\/blogs\/haupt\/connection\/pairing$/, {}, 503, "POST");
+    const u = await renderRegistry();
+    await u.type(await screen.findByLabelText("Adresse des öffentlichen Blogs"), "https://blog.example");
+    await u.click(screen.getByRole("button", { name: "Mit API verbinden" }));
+    expect(await screen.findByText("Verbinden fehlgeschlagen (HTTP 503).")).toBeTruthy();
+  });
+
+  it("says why the blog did not take the pairing directly", async () => {
+    // The refusal happens on the blog's host; the API relays its code.
+    respond(/\/blogs\/haupt\/connection\/pairing$/, {
+      delivered: false,
+      error: "HTTP 422: invalid_origin",
+      fallback_url: "https://blog.example/install#pairing_token=once-only-secret",
+    }, 201, "POST");
+    const u = await renderRegistry();
+    await u.type(await screen.findByLabelText("Adresse des öffentlichen Blogs"), "https://blog.example");
+    await u.click(screen.getByRole("button", { name: "Mit API verbinden" }));
+    expect(await screen.findByText(
+      "Der Blog hat die Verbindung nicht direkt angenommen (HTTP 422: invalid_origin). Öffnen Sie den Einrichtungslink auf dem Blog-Server.",
+    )).toBeTruthy();
+  });
+
+  it("asks the cache to rebuild everything, not one article", async () => {
+    // This button is the catch-up for when a save's targeted rebuild did not
+    // land, so it must not be targeted itself.
+    const u = await renderRegistry();
+    await u.click(await screen.findByRole("button", { name: "Seiten-Cache neu bauen" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    // The blog side sends an EMPTY body for "everything"; the per-article
+    // form is what carries a slug.
+    expect(posts()[0]!.body).toEqual({});
+  });
+
+  it("keeps a remote cache failure in the flow", async () => {
+    respond(/\/blogs\/haupt\/cache\/rebuild$/, {}, 502, "POST");
+    const u = await renderRegistry();
+    await u.click(await screen.findByRole("button", { name: "Seiten-Cache neu bauen" }));
+    expect(await screen.findByText(/Cache-Neubau ist fehlgeschlagen/)).toBeTruthy();
+  });
+
+  it("keeps a missing connection in the flow rather than claiming success", async () => {
+    respond(/\/blogs\/haupt\/cache\/rebuild$/, {}, 503, "POST");
+    const u = await renderRegistry();
+    await u.click(await screen.findByRole("button", { name: "Seiten-Cache neu bauen" }));
+    expect(await screen.findByText(/noch nicht vollständig mit der API verbunden/)).toBeTruthy();
+    expect(toasts.some((t) => t.variant === "success")).toBe(false);
+  });
+
+  it("clears the cache message when the rebuild never reaches the API", async () => {
+    unreachable(/\/blogs\/haupt\/cache\/rebuild$/, "POST");
+    const u = await renderRegistry();
+    await u.click(await screen.findByRole("button", { name: "Seiten-Cache neu bauen" }));
+    await waitFor(() => expect(toasts.some((t) => t.variant === "danger" && t.message.includes("Netzwerkfehler"))).toBe(true));
+    expect(screen.queryByText("Seiten-Cache wird neu gebaut …")).toBeNull();
+  });
+
+  it("keeps the connection when the disconnect never reaches the API", async () => {
+    respond(/\/blogs$/, { blogs: [BLOG] }, 200, "GET");
+    respond(/\/cms\/sites$/, { sites: [] }, 200, "GET");
+    respond(/\/blogs\/haupt\/connection$/, { connection: { origin: "https://blog.example", status: "connected" } }, 200, "GET");
+    unreachable(/\/blogs\/haupt\/connection$/, "DELETE");
+    render(<BlogRegistry />);
+    const u = user();
+    await u.click(await screen.findByRole("button", { name: "Verbindung trennen" }));
+    await waitFor(() => expect(toasts.some((t) => t.variant === "danger" && t.message.includes("Netzwerkfehler"))).toBe(true));
+    expect(screen.getByText("Verbunden mit https://blog.example")).toBeTruthy();
+  });
+});
+
+describe("the list itself", () => {
+  it("reports the HTTP status instead of an empty registry", async () => {
+    respond(/\/blogs$/, {}, 403, "GET");
+    render(<BlogRegistry />);
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      expect.stringContaining("403"),
+    );
+  });
+
+  it("says plainly when nothing is connected", async () => {
+    await renderRegistry([]);
+    expect(await screen.findByText(/Noch kein Blog verbunden/)).toBeTruthy();
+  });
+});
