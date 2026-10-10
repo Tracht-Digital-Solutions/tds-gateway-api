@@ -133,6 +133,8 @@ jobs:
         with: { repository: Tracht-Digital-Solutions/tds-ext-cards-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-cards-pkg }
       - uses: actions/checkout@v5
         with: { repository: Tracht-Digital-Solutions/tds-ext-analytics-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-analytics-pkg }
+      - uses: actions/checkout@v5
+        with: { repository: Tracht-Digital-Solutions/tds-ext-referrals-pkg, ref: main, token: '${{ secrets.ASSEMBLE_TOKEN }}', path: _src/tds-ext-referrals-pkg }
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -321,7 +323,8 @@ jobs:
               "blog-cms":     "$(sha _src/tds-ext-blog-cms-pkg)",
               "shop":         "$(sha _src/tds-ext-shop-pkg)",
               "cards":        "$(sha _src/tds-ext-cards-pkg)",
-              "analytics":    "$(sha _src/tds-ext-analytics-pkg)"
+              "analytics":    "$(sha _src/tds-ext-analytics-pkg)",
+              "referrals":    "$(sha _src/tds-ext-referrals-pkg)"
             }
           }
           EOF

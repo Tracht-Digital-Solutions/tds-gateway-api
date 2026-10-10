@@ -56,7 +56,8 @@ docker compose up -d --force-recreate api
     tds-ext-lexware-pkg/          tds-ext-tools-pkg/           tds-ext-messages-pkg/
     tds-ext-projects-pkg/         tds-ext-documents-pkg/       tds-ext-support-tickets-pkg/
     tds-ext-contact-tickets-pkg/  tds-ext-live-chat-cta-pkg/   tds-ext-website-cms-pkg/
-    tds-ext-blog-cms-pkg/         tds-ext-shop-pkg/
+    tds-ext-blog-cms-pkg/         tds-ext-shop-pkg/            tds-ext-cards-pkg/
+    tds-ext-analytics-pkg/        tds-ext-referrals-pkg/
   ```
 
   Sie werden als *named build contexts* ins Image gezogen — kein GitHub-Token,
