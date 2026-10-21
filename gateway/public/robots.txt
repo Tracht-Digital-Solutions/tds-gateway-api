@@ -1,0 +1,4 @@
+# API origin — machine-to-machine only, never crawl or index.
+# Pairs with the global X-Robots-Tag middleware in src/Bootstrap.php.
+User-agent: *
+Disallow: /

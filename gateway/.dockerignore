@@ -1,0 +1,13 @@
+# Keep the build context (this gateway repo) lean. The composer vendor stage
+# reinstalls dependencies, so a local vendor/ and VCS metadata are noise.
+.git
+.github
+vendor
+tests
+.phpunit.cache
+.phpunit.result.cache
+.env
+.env.docker
+*.log
+node_modules
+dist

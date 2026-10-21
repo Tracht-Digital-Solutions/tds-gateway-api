@@ -1,0 +1,13 @@
+---
+// Tickets page, injected into the host build via the manifest's route slot.
+// Renders the portal ticket board (list + detail + comment thread + new-ticket
+// form). Admin triage lives behind /admin/tickets (admin product target).
+import TicketBoard from "../islands/TicketBoard.tsx";
+---
+
+<section class="tds-page">
+  <div class="tds-page__head">
+    <h1 class="tds-page__title">Support-Tickets</h1>
+  </div>
+  <TicketBoard client:load />
+</section>
