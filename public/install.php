@@ -193,6 +193,9 @@ function env_for(string $name, array $c): string
                 // host that is not the live one, silently and with no log.
                 'WEBAUTHN_RP_ID' => ltrim((string) $c['cookie_domain'], '.'),
                 'WEBAUTHN_RP_NAME' => 'Tracht Digital Solutions',
+                // The forgotten-password link points at the login site, which
+                // lives on auth.<registrable domain> like the passkey RP ID.
+                'PASSWORD_RESET_URL' => 'https://auth.' . ltrim((string) $c['cookie_domain'], '.') . '/passwort-vergessen',
                 'LOGIN_RATE_LIMIT' => '10',
                 'LOGIN_RATE_WINDOW_SECONDS' => '900',
                 // Bootstrap-Admin-Identität dokumentieren, damit ein späterer
@@ -214,6 +217,9 @@ function env_for(string $name, array $c): string
                 'DB_NAME' => $c['db_frontend'],
                 'AUTH_API_URL' => $c['auth_api_url'],
                 'JWKS_CACHE_TTL' => '600',
+                // Shared with auth: authenticates its forgotten-password mail
+                // call (POST /internal/mail/password-reset).
+                'ADMIN_TOKEN' => $c['admin_token'],
                 'SETTINGS_ENCRYPTION_KEY' => $c['settings_encryption_key'],
                 'MAIL_DSN' => '',
                 'MAIL_FROM' => 'no-reply@tracht-digital.de',

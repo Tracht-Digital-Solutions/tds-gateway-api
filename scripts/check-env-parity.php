@@ -64,6 +64,8 @@ const DEFAULTED = [
         'REMEMBER_TTL_SECONDS' => 'Defaults to JWT_REFRESH_TTL_SECONDS, which the installer writes.',
         'WEBAUTHN_CHALLENGE_SECRET' => 'Derived from the RS256 private key when unset — the challenge is not a secret, it only must not be attacker-chosen.',
         'WEBAUTHN_COOKIE_NAME' => 'Defaults to tds_wa_challenge in Bootstrap; not host-dependent.',
+        'FRONTEND_API_URL' => 'Derived from JWT_ISSUER without its /auth suffix — the gateway origin, which the installer writes.',
+        'PASSWORD_RESET_TTL_SECONDS' => 'Defaults to 3600 in Bootstrap; not host-dependent.',
     ],
     'customer' => [
         // Third-party credentials moved to the runtime SettingsStore
@@ -98,6 +100,7 @@ const DEFAULTED = [
         'SERVICE_TOKEN' => 'Falls back to ADMIN_TOKEN, which the installer does write.',
     ],
     'frontend' => [
+        'SERVICE_TOKEN' => 'Falls back to ADMIN_TOKEN, which the installer does write (same value as auth).',
         // The support-tickets mailbox is configured in the panel (runtime
         // SettingsStore, namespace `support-tickets`, AES-256-GCM at rest). The
         // env vars survive only as a fallback for a host that was set up
