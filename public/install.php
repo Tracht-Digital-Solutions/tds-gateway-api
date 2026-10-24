@@ -196,6 +196,8 @@ function env_for(string $name, array $c): string
                 // The forgotten-password link points at the login site, which
                 // lives on auth.<registrable domain> like the passkey RP ID.
                 'PASSWORD_RESET_URL' => 'https://auth.' . ltrim((string) $c['cookie_domain'], '.') . '/passwort-vergessen',
+                // Self-registration confirms on the same login site.
+                'ACCOUNT_CONFIRM_URL' => 'https://auth.' . ltrim((string) $c['cookie_domain'], '.') . '/registrieren',
                 'LOGIN_RATE_LIMIT' => '10',
                 'LOGIN_RATE_WINDOW_SECONDS' => '900',
                 // Bootstrap-Admin-Identität dokumentieren, damit ein späterer

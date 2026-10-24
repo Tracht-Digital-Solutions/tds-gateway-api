@@ -66,6 +66,8 @@ const DEFAULTED = [
         'WEBAUTHN_COOKIE_NAME' => 'Defaults to tds_wa_challenge in Bootstrap; not host-dependent.',
         'FRONTEND_API_URL' => 'Derived from JWT_ISSUER without its /auth suffix — the gateway origin, which the installer writes.',
         'PASSWORD_RESET_TTL_SECONDS' => 'Defaults to 3600 in Bootstrap; not host-dependent.',
+        'ACCOUNT_CONFIRM_TTL_SECONDS' => 'Defaults to 86400 in Bootstrap; not host-dependent.',
+        'SELF_REGISTRATION' => 'Defaults to on (1) in Bootstrap; set 0 only to close sign-ups.',
     ],
     'customer' => [
         // Third-party credentials moved to the runtime SettingsStore
