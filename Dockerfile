@@ -32,6 +32,7 @@
 #     --build-context ext_cards=../tds-ext-cards-pkg \
 #     --build-context ext_analytics=../tds-ext-analytics-pkg \
 #     --build-context ext_referrals=../tds-ext-referrals-pkg \
+#     --build-context ext_opensource=../tds-ext-opensource-pkg \
 #     -t tds-api .
 #
 # `docker compose up` wires those contexts for you (see docker-compose.yml).
@@ -67,6 +68,7 @@ COPY --from=ext_shop          . ./tds-ext-shop-pkg/
 COPY --from=ext_cards         . ./tds-ext-cards-pkg/
 COPY --from=ext_analytics     . ./tds-ext-analytics-pkg/
 COPY --from=ext_referrals     . ./tds-ext-referrals-pkg/
+COPY --from=ext_opensource    . ./tds-ext-opensource-pkg/
 
 # Prod deps for the gateway + the two prefixed backends, then re-add phinx for
 # those two (they keep it in require-dev, but the running container needs the

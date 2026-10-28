@@ -68,6 +68,7 @@ services:
         ext_cards: ../tds-ext-cards-pkg
         ext_analytics: ../tds-ext-analytics-pkg
         ext_referrals: ../tds-ext-referrals-pkg
+        ext_opensource: ../tds-ext-opensource-pkg
     restart: unless-stopped
     depends_on:
       db:
