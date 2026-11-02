@@ -1,0 +1,13 @@
+---
+// Customer/company directory page, injected into the host build via the manifest's
+// route slot. The full CRUD UI is a hydrated React island.
+import CustomersList from "../islands/CustomersList.tsx";
+---
+
+<section class="tds-page">
+  <div class="tds-page__head">
+    <h1 class="tds-page__title">Firmen</h1>
+  </div>
+  <p class="tds-page__lede">Das zentrale Firmenverzeichnis — Grundlage für Zugänge, Abrechnung und Portal.</p>
+  <CustomersList client:load />
+</section>

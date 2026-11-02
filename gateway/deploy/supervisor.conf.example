@@ -1,0 +1,37 @@
+; Run the assembled `build` bundle as processes. Point the host's webserver at
+; the gateway (127.0.0.1:8000); the gateway proxies to the services. Adjust
+; paths to wherever the build branch is checked out.
+;
+; The ports here MUST match the *_UPSTREAM values the gateway is configured
+; with (see Procfile / services.json in the build bundle).
+;
+; public/router.php is REQUIRED on every `php -S` command: without a router
+; script the built-in server 404s any dotted path that has no file on disk
+; (e.g. /.well-known/jwks.json) instead of hitting Slim.
+
+[group:tds]
+programs=tds-gateway,tds-auth,tds-customer,tds-frontend
+
+[program:tds-gateway]
+command=php -S 127.0.0.1:8000 -t /srv/tds/gateway/public /srv/tds/gateway/public/router.php
+directory=/srv/tds/gateway
+autostart=true
+autorestart=true
+
+[program:tds-auth]
+command=php -S 127.0.0.1:8003 -t /srv/tds/services/auth/public /srv/tds/services/auth/public/router.php
+directory=/srv/tds/services/auth
+autostart=true
+autorestart=true
+
+[program:tds-customer]
+command=php -S 127.0.0.1:8004 -t /srv/tds/services/customer/public /srv/tds/services/customer/public/router.php
+directory=/srv/tds/services/customer
+autostart=true
+autorestart=true
+
+[program:tds-frontend]
+command=php -S 127.0.0.1:8100 -t /srv/tds/services/frontend/public /srv/tds/services/frontend/public/router.php
+directory=/srv/tds/services/frontend
+autostart=true
+autorestart=true
